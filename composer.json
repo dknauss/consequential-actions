@@ -1,0 +1,22 @@
+{
+	"name": "dknauss/consequential-actions",
+	"description": "Reauth MVP: a named registry of consequential actions plus actor-password step-up. A wedge for a WordPress core primitive (Trac #20140).",
+	"type": "wordpress-plugin",
+	"license": "GPL-2.0-or-later",
+	"require": {
+		"php": ">=7.4"
+	},
+	"require-dev": {
+		"brain/monkey": "^2.6",
+		"phpunit/phpunit": "^9.6"
+	},
+	"autoload-dev": {
+		"psr-4": { "ConsequentialActions\\Tests\\": "tests/" }
+	},
+	"scripts": {
+		"test": "phpunit"
+	},
+	"config": {
+		"allow-plugins": false
+	}
+}

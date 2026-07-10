@@ -64,14 +64,14 @@ Core hooks, no new machinery:
 
 ## Status & next steps
 
-`v0.1.0` is a demonstrator. Known follow-ups before it would be a real plugin:
+`v0.1.1` is a demonstrator. Status of the follow-ups:
 
-- **Tests.** `triggered_actions()` is pure, testable business logic and should have
-  unit coverage (Brain\Monkey) before further changes — not yet added.
-- **Progressive enhancement.** A modal only when needed, instead of an always-present
-  inline field.
+- **Tests.** ✅ `triggered_actions()` has Brain\Monkey unit coverage
+  (`tests/TriggeredActionsTest.php`, 10 tests). Run with `composer install && composer test`.
+- **Progressive enhancement.** ✅ A no-build modal collects the password on submit;
+  the inline field is the no-JS fallback.
 - **The registry as its own thing.** Layer 1 deserves to be proposed to core
-  independently of the gate.
+  independently of the gate — still open.
 
 ## License
 
