@@ -3,7 +3,7 @@ Contributors: dknauss
 Tags: security, reauthentication, sudo, two-factor
 Requires at least: 6.4
 Requires PHP: 7.4
-Stable tag: 0.1.2
+Stable tag: 0.1.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -66,6 +66,12 @@ a named registry plus a thin gate, offered as a wedge for a core primitive rathe
 than as another standalone product.
 
 == Changelog ==
+
+= 0.1.3 =
+* Minimal demo now walks all three account-takeover actions — change password,
+  create user, and promote to Administrator — to show the same challenge guards
+  the whole class, not one field. (No change to gating logic: create-user and
+  promote-user were already gated; the demo simply now exercises them.)
 
 = 0.1.2 =
 * The sudo window is now filterable (`ca_sudo_window`, return 0 to always

@@ -34,11 +34,12 @@ runnable — not to be yet another standalone reauth plugin.
 
 No install — runs entirely in your browser.
 
-- **Minimal** (one gated action, window mode):
-  [Open in Playground](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/v0.1.2/demo/blueprint-minimal.json)
+- **Minimal** (the same challenge on all three account-takeover actions — change
+  password, create user, promote to Administrator):
+  [Open in Playground](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/v0.1.3/demo/blueprint-minimal.json)
 - **Guided tour** (force-logout + mail log showing the email-change confirmation
   and the reset-email bypass path):
-  [Open in Playground](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/v0.1.2/demo/blueprint-tour.json)
+  [Open in Playground](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/v0.1.3/demo/blueprint-tour.json)
 
 Both links pin to the immutable `v0.1.0` tag, so they keep working. The blueprints
 live in [`demo/`](demo/).
@@ -64,7 +65,7 @@ Core hooks, no new machinery:
 
 ## Status & next steps
 
-`v0.1.2` is a demonstrator. Status of the follow-ups:
+`v0.1.3` is a demonstrator. Status of the follow-ups:
 
 - **Tests.** ✅ `triggered_actions()` has Brain\Monkey unit coverage
   (`tests/TriggeredActionsTest.php`, 10 tests). Run with `composer install && composer test`.
