@@ -32,22 +32,20 @@ runnable — not to be yet another standalone reauth plugin.
 
 ## Try it live (WordPress Playground)
 
-No install — runs entirely in your browser.
+No install — runs entirely in your browser. The demo walks all three
+account-takeover actions (change your password, create a user, promote one to
+Administrator); each pops the same reauth challenge. WP Mail Logging is bundled so
+you can see the emails those actions send.
 
-- **Minimal** (the same challenge on all three account-takeover actions — change
-  password, create user, promote to Administrator):
-  [Open in Playground](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/v0.1.3/demo/blueprint-minimal.json)
-- **Guided tour** (force-logout + mail log showing the email-change confirmation
-  and the reset-email bypass path):
-  [Open in Playground](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/v0.1.3/demo/blueprint-tour.json)
+[**Open in Playground**](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/v0.1.4/demo/blueprint.json)
 
-Both links pin to the immutable `v0.1.0` tag, so they keep working. The blueprints
-live in [`demo/`](demo/).
+The link pins to the immutable `v0.1.4` tag, so it keeps working. The blueprint
+lives in [`demo/`](demo/).
 
 ## What this deliberately does NOT do
 
 No REST / Application Password / WP-CLI / cron policy. No request stash-and-replay.
-No 2FA / passkeys / modal. No multisite network-session semantics. Those are the
+No 2FA / passkeys. No multisite network-session semantics. Those are the
 heavy framework pieces this MVP argues core should not have to standardize all at
 once — and exactly what a full implementation (WP Sudo) takes on.
 
@@ -65,10 +63,11 @@ Core hooks, no new machinery:
 
 ## Status & next steps
 
-`v0.1.3` is a demonstrator. Status of the follow-ups:
+`v0.1.4` is a demonstrator. Status of the follow-ups:
 
-- **Tests.** ✅ `triggered_actions()` has Brain\Monkey unit coverage
-  (`tests/TriggeredActionsTest.php`, 10 tests). Run with `composer install && composer test`.
+- **Tests.** ✅ `triggered_actions()` and the sudo-window helpers have Brain\Monkey
+  unit coverage (`tests/TriggeredActionsTest.php`, 14 tests). Run with
+  `composer install && composer test`.
 - **Progressive enhancement.** ✅ A no-build modal collects the password on submit;
   the inline field is the no-JS fallback.
 - **The registry as its own thing.** Layer 1 deserves to be proposed to core

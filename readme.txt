@@ -3,7 +3,7 @@ Contributors: dknauss
 Tags: security, reauthentication, sudo, two-factor
 Requires at least: 6.4
 Requires PHP: 7.4
-Stable tag: 0.1.3
+Stable tag: 0.1.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -66,6 +66,13 @@ a named registry plus a thin gate, offered as a wedge for a core primitive rathe
 than as another standalone product.
 
 == Changelog ==
+
+= 0.1.4 =
+* One demo instead of two: the guided-tour blueprint is removed and its useful
+  part (mail logging) folds into the single demo, which now bundles WP Mail
+  Logging so you can see the emails the gated actions send.
+* Demo notice acknowledges a password change and points at the new password once
+  you have changed it, instead of showing the original credential.
 
 = 0.1.3 =
 * Minimal demo now walks all three account-takeover actions — change password,

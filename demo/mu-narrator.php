@@ -1,19 +1,36 @@
 <?php
 /**
- * Consequential Actions — guided-tour narrator (demo only).
+ * Consequential Actions — demo narrator (demo only).
  *
- * This mu-plugin is DEMO SCAFFOLDING, not part of the plugin. It only narrates:
- * it prints step-by-step notices on the relevant admin screens so a first-time
- * visitor can experience the password/email/reauth sequence without a tour guide.
- * It changes no behavior and enforces nothing.
- *
- * The guided-tour blueprint enables the plugin's hardened force-logout mode
- * (CA_TERMINATE_SESSION), so the notices below describe that flow.
+ * DEMO SCAFFOLDING, not part of the plugin. It only narrates the walkthrough and
+ * tunes two demo-only things; it enforces nothing.
+ *   - Sets the sudo window to 0 so every gated action re-challenges (repeatable).
+ *   - Once the admin has changed their own password, stops showing the original
+ *     demo credential and points at the new password instead.
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
+
+// Every gated action re-challenges in the demo.
+add_filter( 'ca_sudo_window', '__return_zero' );
+
+// Remember when the current admin has changed their own password.
+add_action(
+	'profile_update',
+	function ( $user_id, $old ) {
+		if ( (int) $user_id !== get_current_user_id() ) {
+			return;
+		}
+		$user = get_userdata( $user_id );
+		if ( $user && isset( $old->user_pass ) && $user->user_pass !== $old->user_pass ) {
+			update_user_meta( $user_id, '_ca_demo_pw_changed', 1 );
+		}
+	},
+	10,
+	2
+);
 
 add_action(
 	'admin_notices',
@@ -23,20 +40,23 @@ add_action(
 			return;
 		}
 
+		$changed = (bool) get_user_meta( get_current_user_id(), '_ca_demo_pw_changed', true );
+		// Which credential the confirmation dialog now wants.
+		$cred = $changed ? 'your <em>new</em> password' : '<code>password</code>';
+
+		$profile = $changed
+			? '<strong>&#10003; Password changed.</strong> Use your <em>new</em> password from now on &mdash; both to sign in and whenever the confirmation dialog asks for your current password.'
+			: '<strong>Demo 1 &mdash; change your password.</strong> Set a New Password and click Update Profile. A dialog asks for your <em>current</em> password (' . $cred . ') before it saves, and re-challenges every time. Log out and back in to prove it changed.';
+
 		$notices = array(
-			// Own profile: password + email change.
-			'profile'   => '<strong>Step 1 — change your own account.</strong> Set a <em>New Password</em> (or change the email) and click <em>Update Profile</em>. Because force-logout mode is on in this demo, WordPress will sign you out and ask you to reauthenticate before the change can complete. Log back in with <code>admin</code> / <code>password</code>.',
-			// Add new user.
-			'user'      => '<strong>Step 2 — create a user.</strong> Creating a user is a consequential action too. In force-logout mode this also requires reauthentication first.',
-			// Users list — point at promotion + the target user.
-			'users'     => '<strong>Step 3 — promote a user.</strong> Try changing <code>targetuser</code> to Administrator (Users → hover → Edit → Role). Granting admin is gated the same way. Note you never need <code>targetuser</code>\'s password — only your own recent sign-in.',
-			// Mail log viewer.
-			'toplevel_page_wpml_plugin_log' => '<strong>Read the mail.</strong> Every email WordPress sent during this demo is captured here — the email-change confirmation and any password/reset notices. This is the "change the email, then use password reset" bypass path made visible: gating one field is not enough, which is why the plugin targets the <em>action</em>, not the input.',
+			'profile'   => $profile,
+			'user'      => '<strong>Demo 2 &mdash; create a user.</strong> Creating a user is a consequential action too, so the same challenge guards it (confirm with ' . $cred . '). Then open <em>WP Mail Logging</em> in the menu to see the notification WordPress sent.',
+			'users'     => '<strong>Demo 3 &mdash; promote to Administrator.</strong> Edit <code>targetuser</code> and set Role to Administrator to see the same challenge.',
+			'user-edit' => '<strong>Demo 3 &mdash; promote to Administrator.</strong> Change this user\'s Role to Administrator and Update. Gated the same way &mdash; and notice you never need <em>their</em> password, only your own recent sign-in. The challenge guards the <em>action</em>, not one field.',
 		);
 
-		$id = $screen->id;
-		if ( isset( $notices[ $id ] ) ) {
-			echo '<div class="notice notice-info"><p>' . wp_kses_post( $notices[ $id ] ) . '</p></div>';
+		if ( isset( $notices[ $screen->id ] ) ) {
+			echo '<div class="notice notice-info"><p>' . wp_kses_post( $notices[ $screen->id ] ) . '</p></div>';
 		}
 	}
 );
