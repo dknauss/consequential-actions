@@ -11,6 +11,8 @@ use Brain\Monkey\Functions;
 use PHPUnit\Framework\TestCase;
 
 use function ConsequentialActions\triggered_actions;
+use function ConsequentialActions\window_seconds;
+use function ConsequentialActions\confirmed_recently;
 
 final class TriggeredActionsTest extends TestCase {
 
@@ -143,5 +145,39 @@ final class TriggeredActionsTest extends TestCase {
 			array( 'core/change-own-password', 'core/change-own-email' ),
 			triggered_actions( true, $this->user( 5, 'old@example.test' ) )
 		);
+	}
+
+	public function test_window_defaults_to_five_minutes() : void {
+		// setUp stubs apply_filters to return the default (arg 2).
+		$this->assertSame( 300, window_seconds() );
+	}
+
+	public function test_window_is_filterable() : void {
+		Functions\when( 'apply_filters' )->alias(
+			static function ( $tag, $value ) {
+				return 'ca_sudo_window' === $tag ? 0 : $value;
+			}
+		);
+		$this->assertSame( 0, window_seconds() );
+	}
+
+	public function test_zero_window_never_counts_as_recently_confirmed() : void {
+		Functions\when( 'apply_filters' )->alias(
+			static function ( $tag, $value ) {
+				return 'ca_sudo_window' === $tag ? 0 : $value;
+			}
+		);
+		Functions\when( 'get_current_user_id' )->justReturn( 5 );
+		// Even if a stale transient exists, a 0 window must short-circuit to false.
+		Functions\when( 'get_transient' )->justReturn( time() );
+
+		$this->assertFalse( confirmed_recently() );
+	}
+
+	public function test_recently_confirmed_true_within_window() : void {
+		Functions\when( 'get_current_user_id' )->justReturn( 5 );
+		Functions\when( 'get_transient' )->justReturn( time() );
+
+		$this->assertTrue( confirmed_recently() );
 	}
 }

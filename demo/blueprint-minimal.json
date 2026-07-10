@@ -13,7 +13,7 @@
       "step": "installPlugin",
       "pluginData": {
         "resource": "url",
-        "url": "https://wordpress-playground-cors-proxy.net/?https://github.com/dknauss/consequential-actions/archive/refs/tags/v0.1.1.zip"
+        "url": "https://wordpress-playground-cors-proxy.net/?https://github.com/dknauss/consequential-actions/archive/refs/tags/v0.1.2.zip"
       },
       "options": { "activate": true, "targetFolderName": "consequential-actions" },
       "ifAlreadyInstalled": "overwrite",
@@ -22,7 +22,7 @@
     {
       "step": "writeFile",
       "path": "/wordpress/wp-content/mu-plugins/ca-demo-hint.php",
-      "data": "<?php\nadd_action( 'admin_notices', function () {\n\t$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;\n\tif ( ! $screen || 'profile' !== $screen->id ) {\n\t\treturn;\n\t}\n\techo '<div class=\"notice notice-info\"><p><strong>Demo:</strong> scroll to <em>New Password</em>, set a new password, and click <em>Update Profile</em>. Consequential Actions will require you to confirm your <em>current</em> password before the change is saved. Default admin password here is <code>password</code>.</p></div>';\n} );\n"
+      "data": "<?php\n// Demo: disable the sudo window so every gated action re-challenges (repeatable).\nadd_filter( 'ca_sudo_window', '__return_zero' );\nadd_action( 'admin_notices', function () {\n\t$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;\n\tif ( ! $screen || 'profile' !== $screen->id ) {\n\t\treturn;\n\t}\n\techo '<div class=\"notice notice-info\"><p><strong>Demo:</strong> scroll to <em>New Password</em>, set one, and click <em>Update Profile</em>. A dialog asks for your <em>current</em> password (<code>password</code>) before the change saves &mdash; and it re-challenges every time. To prove it really changed, log out and sign back in with your new password.</p></div>';\n} );\n"
     }
   ]
 }

@@ -3,7 +3,7 @@
  * Plugin Name:       Consequential Actions (Reauth MVP)
  * Plugin URI:        https://github.com/dknauss/consequential-actions
  * Description:       Requires the acting user to re-confirm their current password before account-takeover actions (password/email change, user creation, promotion to administrator) commit. A minimal demonstrator for a possible WordPress core "consequential actions" registry + proof-of-intent primitive. See Trac #20140.
- * Version:           0.1.1
+ * Version:           0.1.2
  * Requires at least: 6.4
  * Requires PHP:      7.4
  * Author:            Dan Knauss
@@ -46,10 +46,25 @@ const NONCE_FIELD   = 'ca_confirm_nonce';
  * mode, a fresh login), further consequential actions by the same user skip the
  * prompt for this long.
  *
+ * NOTE this is NOT a session. It is a single per-user transient flag with a TTL
+ * (see confirm_key()) — a deliberately minimal imitation of sudo-mode's short
+ * elevation. It is not cookie- or session-bound, so it is shared across all of
+ * the user's sessions/devices for the window's duration. A real implementation
+ * binds elevation to the session (WP Sudo does); this MVP intentionally does not.
+ *
  * Trade-off: a window is friendlier but widens exposure — a session hijacked
- * right after a confirm inherits the window. Set to 0 to always re-prompt.
+ * right after a confirm inherits it. Filter to 0 to always re-challenge.
+ *
+ * @return int Seconds. 0 = always re-challenge.
  */
-const WINDOW = 5 * MINUTE_IN_SECONDS;
+function window_seconds() : int {
+	/**
+	 * Filter the sudo-window length in seconds.
+	 *
+	 * @param int $seconds Default 5 minutes. Return 0 to always re-challenge.
+	 */
+	return (int) apply_filters( 'ca_sudo_window', 5 * MINUTE_IN_SECONDS );
+}
 
 /**
  * @return bool Whether hardened force-logout mode is enabled.
@@ -260,7 +275,7 @@ function enqueue_modal( $hook ) : void {
 		'ca-modal',
 		plugins_url( 'assets/modal.js', __FILE__ ),
 		array(),
-		'0.1.1',
+		'0.1.2',
 		true
 	);
 
@@ -344,7 +359,7 @@ function pending_key( int $user_id ) : string {
  * @return bool Whether the current user confirmed within the sudo window.
  */
 function confirmed_recently() : bool {
-	if ( WINDOW <= 0 ) {
+	if ( window_seconds() <= 0 ) {
 		return false;
 	}
 	return (bool) get_transient( confirm_key( get_current_user_id() ) );
@@ -356,8 +371,9 @@ function confirmed_recently() : bool {
  * @param int $user_id
  */
 function mark_confirmed( int $user_id ) : void {
-	if ( WINDOW > 0 ) {
-		set_transient( confirm_key( $user_id ), time(), WINDOW );
+	$window = window_seconds();
+	if ( $window > 0 ) {
+		set_transient( confirm_key( $user_id ), time(), $window );
 	}
 }
 

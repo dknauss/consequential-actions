@@ -27,7 +27,7 @@ runnable — not to be yet another standalone reauth plugin.
 
 | Mode | How to enable | Behavior |
 |------|---------------|----------|
-| **Window** (default) | — | On a gated submit, a modal asks for your current password and submits it with the form (no scrolling, no re-entry). With JavaScript off, an inline "confirm your current password" field is the fallback and the server still enforces. A successful confirm opens a short (5-minute) sudo window. |
+| **Window** (default) | — | On a gated submit, a modal asks for your current password and submits it with the form (no scrolling, no re-entry). With JavaScript off, an inline "confirm your current password" field is the fallback and the server still enforces. A successful confirm opens a short "sudo window" (default 5 min; filter `ca_sudo_window`, return 0 to always re-challenge). Note: the window is a per-user transient flag, **not** a session — it is not session/cookie-bound (WP Sudo does that properly). |
 | **Hardened** (force-logout) | `define( 'CA_TERMINATE_SESSION', true );` | An unconfirmed gated action signs the user out and forces a full reauthentication before they can retry — the stronger reading of Trac #20140 comment 31. |
 
 ## Try it live (WordPress Playground)
@@ -35,10 +35,10 @@ runnable — not to be yet another standalone reauth plugin.
 No install — runs entirely in your browser.
 
 - **Minimal** (one gated action, window mode):
-  [Open in Playground](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/v0.1.1/demo/blueprint-minimal.json)
+  [Open in Playground](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/v0.1.2/demo/blueprint-minimal.json)
 - **Guided tour** (force-logout + mail log showing the email-change confirmation
   and the reset-email bypass path):
-  [Open in Playground](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/v0.1.1/demo/blueprint-tour.json)
+  [Open in Playground](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/v0.1.2/demo/blueprint-tour.json)
 
 Both links pin to the immutable `v0.1.0` tag, so they keep working. The blueprints
 live in [`demo/`](demo/).
@@ -64,7 +64,7 @@ Core hooks, no new machinery:
 
 ## Status & next steps
 
-`v0.1.1` is a demonstrator. Status of the follow-ups:
+`v0.1.2` is a demonstrator. Status of the follow-ups:
 
 - **Tests.** ✅ `triggered_actions()` has Brain\Monkey unit coverage
   (`tests/TriggeredActionsTest.php`, 10 tests). Run with `composer install && composer test`.

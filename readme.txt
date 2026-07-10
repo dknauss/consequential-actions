@@ -3,7 +3,7 @@ Contributors: dknauss
 Tags: security, reauthentication, sudo, two-factor
 Requires at least: 6.4
 Requires PHP: 7.4
-Stable tag: 0.1.1
+Stable tag: 0.1.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -66,6 +66,12 @@ a named registry plus a thin gate, offered as a wedge for a core primitive rathe
 than as another standalone product.
 
 == Changelog ==
+
+= 0.1.2 =
+* The sudo window is now filterable (`ca_sudo_window`, return 0 to always
+  re-challenge) and documented as a per-user transient flag, not a session.
+* Minimal demo sets the window to 0 so the challenge is repeatable and the effect
+  is verifiable by signing out and back in.
 
 = 0.1.1 =
 * Window mode: progressive-enhancement modal (no build step) collects the current
