@@ -3,7 +3,7 @@
  * Plugin Name:       Consequential Actions (Reauth MVP)
  * Plugin URI:        https://github.com/dknauss/consequential-actions
  * Description:       Requires the acting user to re-confirm their current password before account-takeover actions (password/email change, user creation, promotion to administrator) commit. A minimal demonstrator for a possible WordPress core "consequential actions" registry + proof-of-intent primitive. See Trac #20140.
- * Version:           0.1.5
+ * Version:           0.1.6
  * Requires at least: 6.4
  * Requires PHP:      7.4
  * Author:            Dan Knauss
@@ -133,11 +133,12 @@ function triggered_actions( bool $is_update, $existing ) : array {
 		}
 	}
 
-	// Promotion to administrator (the escalation path that matters most).
+	// Promotion into administrator-equivalent authority — detected by capability,
+	// not the literal "administrator" role name, so privileged custom roles count.
 	if ( isset( $_POST['role'] ) && current_user_can( 'promote_users' ) ) {
-		$new_role = sanitize_key( wp_unslash( $_POST['role'] ) );
-		$old_role = ( $existing && ! empty( $existing->roles ) ) ? (string) reset( $existing->roles ) : '';
-		if ( 'administrator' === $new_role && 'administrator' !== $old_role ) {
+		$new_role  = sanitize_key( wp_unslash( $_POST['role'] ) );
+		$old_roles = ( $existing && ! empty( $existing->roles ) ) ? (array) $existing->roles : array();
+		if ( '' !== $new_role && role_change_escalates( $new_role, $old_roles ) ) {
 			$triggered[] = 'core/promote-user';
 		}
 	}
@@ -145,6 +146,73 @@ function triggered_actions( bool $is_update, $existing ) : array {
 	// phpcs:enable WordPress.Security.NonceVerification.Missing
 
 	return array_values( array_intersect( array_unique( $triggered ), array_keys( actions() ) ) );
+}
+
+/**
+ * Does assigning $new_role grant administrator-equivalent authority the user's
+ * current roles do not already hold?
+ *
+ * Detects privilege escalation by capability rather than by the literal
+ * "administrator" role name, so a privileged custom role — one granting, say,
+ * manage_options or activate_plugins — is caught too. Returns false for a
+ * sideways move into a non-privileged role, or when the user already holds the
+ * authority the new role would grant.
+ *
+ * @param string   $new_role  Slug of the role being assigned.
+ * @param string[] $old_roles Slugs of the user's current roles.
+ * @return bool
+ */
+function role_change_escalates( string $new_role, array $old_roles ) : bool {
+	// Capabilities that mark administrator-equivalent authority.
+	$sensitive = array(
+		'manage_options',
+		'promote_users',
+		'edit_users',
+		'delete_users',
+		'create_users',
+		'activate_plugins',
+		'install_plugins',
+		'edit_plugins',
+		'update_core',
+	);
+
+	$new = get_role( $new_role );
+	if ( ! $new ) {
+		return false;
+	}
+
+	// Sensitive caps the target role grants.
+	$new_sensitive = array();
+	foreach ( $sensitive as $cap ) {
+		if ( ! empty( $new->capabilities[ $cap ] ) ) {
+			$new_sensitive[] = $cap;
+		}
+	}
+	if ( empty( $new_sensitive ) ) {
+		return false; // Target role is not administrator-equivalent.
+	}
+
+	// Sensitive caps the user already holds through their current roles.
+	$held = array();
+	foreach ( $old_roles as $slug ) {
+		$role = get_role( (string) $slug );
+		if ( ! $role ) {
+			continue;
+		}
+		foreach ( $sensitive as $cap ) {
+			if ( ! empty( $role->capabilities[ $cap ] ) ) {
+				$held[ $cap ] = true;
+			}
+		}
+	}
+
+	// Escalation if the new role grants any sensitive cap the user lacks today.
+	foreach ( $new_sensitive as $cap ) {
+		if ( empty( $held[ $cap ] ) ) {
+			return true;
+		}
+	}
+	return false;
 }
 
 /**
@@ -194,10 +262,12 @@ function gate( $errors, $update, $user ) : void {
 		return;
 	}
 
+	// Labels come from the filterable registry, so escape each one — a third-party
+	// filter must not be able to inject markup into the error notice.
 	$labels = array_map(
 		static function ( $id ) {
 			$catalog = actions();
-			return $catalog[ $id ]['label'];
+			return esc_html( $catalog[ $id ]['label'] );
 		},
 		$triggered
 	);
@@ -275,7 +345,7 @@ function enqueue_modal( $hook ) : void {
 		'ca-modal',
 		plugins_url( 'assets/modal.js', __FILE__ ),
 		array(),
-		'0.1.5',
+		'0.1.6',
 		true
 	);
 

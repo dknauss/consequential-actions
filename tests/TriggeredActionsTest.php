@@ -45,6 +45,29 @@ final class TriggeredActionsTest extends TestCase {
 		);
 	}
 
+	/**
+	 * Stub get_role() with a small role/capability map. `shop_manager` is a
+	 * privileged custom role (grants manage_options) but is NOT literally
+	 * "administrator" — the case the promotion fix must catch.
+	 */
+	private function stub_roles() : void {
+		$admin_caps = array_fill_keys(
+			array( 'manage_options', 'promote_users', 'edit_users', 'delete_users', 'create_users', 'activate_plugins', 'install_plugins', 'edit_plugins', 'update_core' ),
+			true
+		);
+		$roles = array(
+			'administrator' => (object) array( 'capabilities' => $admin_caps ),
+			'editor'        => (object) array( 'capabilities' => array( 'edit_posts' => true, 'edit_others_posts' => true, 'unfiltered_html' => true ) ),
+			'subscriber'    => (object) array( 'capabilities' => array( 'read' => true ) ),
+			'shop_manager'  => (object) array( 'capabilities' => array( 'manage_options' => true, 'edit_posts' => true ) ),
+		);
+		Functions\when( 'get_role' )->alias(
+			static function ( $slug ) use ( $roles ) {
+				return $roles[ $slug ] ?? null;
+			}
+		);
+	}
+
 	public function test_create_user_triggers_create() : void {
 		Functions\when( 'get_current_user_id' )->justReturn( 1 );
 
@@ -95,6 +118,7 @@ final class TriggeredActionsTest extends TestCase {
 	}
 
 	public function test_promotion_to_administrator() : void {
+		$this->stub_roles();
 		Functions\when( 'get_current_user_id' )->justReturn( 1 );
 		Functions\when( 'current_user_can' )->justReturn( true );
 		$_POST['role'] = 'administrator';
@@ -105,7 +129,34 @@ final class TriggeredActionsTest extends TestCase {
 		);
 	}
 
+	public function test_promotion_to_privileged_custom_role_escalates() : void {
+		$this->stub_roles();
+		Functions\when( 'get_current_user_id' )->justReturn( 1 );
+		Functions\when( 'current_user_can' )->justReturn( true );
+		// Not literally "administrator", but grants manage_options.
+		$_POST['role'] = 'shop_manager';
+
+		$this->assertSame(
+			array( 'core/promote-user' ),
+			triggered_actions( true, $this->user( 2, 'user@example.test', array( 'editor' ) ) )
+		);
+	}
+
+	public function test_sideways_change_to_nonadmin_role_does_not_escalate() : void {
+		$this->stub_roles();
+		Functions\when( 'get_current_user_id' )->justReturn( 1 );
+		Functions\when( 'current_user_can' )->justReturn( true );
+		// editor grants no administrator-equivalent capability.
+		$_POST['role'] = 'editor';
+
+		$this->assertSame(
+			array(),
+			triggered_actions( true, $this->user( 2, 'user@example.test', array( 'subscriber' ) ) )
+		);
+	}
+
 	public function test_no_promotion_when_already_administrator() : void {
+		$this->stub_roles();
 		Functions\when( 'get_current_user_id' )->justReturn( 1 );
 		Functions\when( 'current_user_can' )->justReturn( true );
 		$_POST['role'] = 'administrator';

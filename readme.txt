@@ -3,7 +3,7 @@ Contributors: dknauss
 Tags: security, reauthentication, sudo, two-factor
 Requires at least: 6.4
 Requires PHP: 7.4
-Stable tag: 0.1.5
+Stable tag: 0.1.6
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -66,6 +66,13 @@ a named registry plus a thin gate, offered as a wedge for a core primitive rathe
 than as another standalone product.
 
 == Changelog ==
+
+= 0.1.6 =
+* Security: promotion is now detected by capability, not the literal
+  "administrator" role name, so escalation into a privileged custom role (one
+  granting manage_options, activate_plugins, etc.) is also gated.
+* Hardening: escape each registry action label individually before it is shown
+  in the reauth error, so a third-party filter cannot inject markup.
 
 = 0.1.5 =
 * Demo rewritten around one story: a stolen-session account takeover and the wall

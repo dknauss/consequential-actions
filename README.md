@@ -60,9 +60,9 @@ could not be silently hijacked.
 The gate closes the **account-takeover** class; it does not make a hijacked *admin*
 omnipotent (that admin could still install a plugin — out of scope for this MVP).
 
-[**Open in Playground**](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/v0.1.5/demo/blueprint.json)
+[**Open in Playground**](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/v0.1.6/demo/blueprint.json)
 
-The link pins to the immutable `v0.1.5` tag, so it keeps working. The blueprint
+The link pins to the immutable `v0.1.6` tag, so it keeps working. The blueprint
 lives in [`demo/`](demo/).
 
 ## What this deliberately does NOT do
@@ -86,7 +86,7 @@ Core hooks, no new machinery:
 
 ## Status & next steps
 
-`v0.1.5` is a demonstrator. Status of the follow-ups:
+`v0.1.6` is a demonstrator. Status of the follow-ups:
 
 - **Tests.** ✅ `triggered_actions()` and the sudo-window helpers have Brain\Monkey
   unit coverage (`tests/TriggeredActionsTest.php`, 14 tests). Run with
