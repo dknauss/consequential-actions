@@ -28,18 +28,41 @@ runnable — not to be yet another standalone reauth plugin.
 | Mode | How to enable | Behavior |
 |------|---------------|----------|
 | **Window** (default) | — | On a gated submit, a modal asks for your current password and submits it with the form (no scrolling, no re-entry). With JavaScript off, an inline "confirm your current password" field is the fallback and the server still enforces. A successful confirm opens a short "sudo window" (default 5 min; filter `ca_sudo_window`, return 0 to always re-challenge). Note: the window is a per-user transient flag, **not** a session — it is not session/cookie-bound (WP Sudo does that properly). |
-| **Hardened** (force-logout) | `define( 'CA_TERMINATE_SESSION', true );` | An unconfirmed gated action signs the user out and forces a full reauthentication before they can retry — the stronger reading of Trac #20140 comment 31. |
+| **Hardened** (force-logout) | `define( 'CA_TERMINATE_SESSION', true );` | An unconfirmed gated action signs the user out and forces a full re-login before they can retry — the literal reading of Trac #20140 comment 31. |
+
+### When to prefer force-logout
+
+The modal proves intent for one action but leaves the session alive. Force-logout
+treats the session itself as untrusted and tears it down — the stronger answer to
+the threat that motivates this project, a **stolen session cookie**:
+
+- **Ejects a possibly-hijacked session** — the attacker must re-present credentials
+  they don't have.
+- **Reauthenticates through the real login pipeline**, inheriting its **2FA /
+  passkeys / rate-limiting / lockouts**, instead of a bare inline password check.
+- **Leaves no lingering elevation window** on the old session.
+- **Produces a real, audited `wp_login` event**, not a soft in-session confirm.
+
+The cost is friction (you lose the session and any unsaved work), so it is an
+opt-in policy: default to the low-friction modal, choose force-logout for
+high-assurance or stolen-cookie-sensitive sites.
 
 ## Try it live (WordPress Playground)
 
-No install — runs entirely in your browser. The demo walks all three
-account-takeover actions (change your password, create a user, promote one to
-Administrator); each pops the same reauth challenge. WP Mail Logging is bundled so
-you can see the emails those actions send.
+No install — runs entirely in your browser. The demo tells **one story**: an
+account takeover from a hijacked (stolen-cookie) session, and the wall the gate
+puts in front of every step. Try to change the account's **email** (its recovery
+path), create a backdoor **admin**, or **promote** a user — each demands the
+account password the attacker doesn't have. WP Mail Logging is bundled so you can
+watch a "Lost your password?" reset go to the *real* owner, because the email
+could not be silently hijacked.
 
-[**Open in Playground**](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/v0.1.4/demo/blueprint.json)
+The gate closes the **account-takeover** class; it does not make a hijacked *admin*
+omnipotent (that admin could still install a plugin — out of scope for this MVP).
 
-The link pins to the immutable `v0.1.4` tag, so it keeps working. The blueprint
+[**Open in Playground**](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/v0.1.5/demo/blueprint.json)
+
+The link pins to the immutable `v0.1.5` tag, so it keeps working. The blueprint
 lives in [`demo/`](demo/).
 
 ## What this deliberately does NOT do
@@ -63,7 +86,7 @@ Core hooks, no new machinery:
 
 ## Status & next steps
 
-`v0.1.4` is a demonstrator. Status of the follow-ups:
+`v0.1.5` is a demonstrator. Status of the follow-ups:
 
 - **Tests.** ✅ `triggered_actions()` and the sudo-window helpers have Brain\Monkey
   unit coverage (`tests/TriggeredActionsTest.php`, 14 tests). Run with

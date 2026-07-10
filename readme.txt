@@ -3,7 +3,7 @@ Contributors: dknauss
 Tags: security, reauthentication, sudo, two-factor
 Requires at least: 6.4
 Requires PHP: 7.4
-Stable tag: 0.1.4
+Stable tag: 0.1.5
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -66,6 +66,14 @@ a named registry plus a thin gate, offered as a wedge for a core primitive rathe
 than as another standalone product.
 
 == Changelog ==
+
+= 0.1.5 =
+* Demo rewritten around one story: a stolen-session account takeover and the wall
+  the gate puts in front of every step, including the reset-email recovery point
+  (change the email and even "Lost your password?" would reach the attacker — so
+  gating email-change keeps recovery pointed at the real owner).
+* Force-logout mode is now documented as a preferred alternative for stolen-cookie
+  containment (reuses the login pipeline's 2FA/lockouts), not a deprecated path.
 
 = 0.1.4 =
 * One demo instead of two: the guided-tour blueprint is removed and its useful

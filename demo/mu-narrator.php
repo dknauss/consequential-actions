@@ -5,8 +5,10 @@
  * DEMO SCAFFOLDING, not part of the plugin. It only narrates the walkthrough and
  * tunes two demo-only things; it enforces nothing.
  *   - Sets the sudo window to 0 so every gated action re-challenges (repeatable).
- *   - Once the admin has changed their own password, stops showing the original
- *     demo credential and points at the new password instead.
+ *   - Once the admin has changed their own password, points at the new password.
+ *
+ * The narration frames one story: a stolen-session account takeover, and the wall
+ * the gate puts in front of every step of it.
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -41,18 +43,16 @@ add_action(
 		}
 
 		$changed = (bool) get_user_meta( get_current_user_id(), '_ca_demo_pw_changed', true );
-		// Which credential the confirmation dialog now wants.
-		$cred = $changed ? 'your <em>new</em> password' : '<code>password</code>';
 
 		$profile = $changed
-			? '<strong>&#10003; Password changed.</strong> Use your <em>new</em> password from now on &mdash; both to sign in and whenever the confirmation dialog asks for your current password.'
-			: '<strong>Demo 1 &mdash; change your password.</strong> Set a New Password and click Update Profile. A dialog asks for your <em>current</em> password (' . $cred . ') before it saves, and re-challenges every time. Log out and back in to prove it changed.';
+			? '<strong>&#10003; Password changed.</strong> Use your <em>new</em> password from now on, including at the confirmation dialog. Note the wall appeared <em>before</em> the change saved &mdash; a stolen session, lacking your password, stops right there.'
+			: '<strong>&#128274; Account takeover, live.</strong> Picture an attacker holding this admin\'s stolen session cookie: logged in, but they do not know the password, and their goal is to lock you out for good. Every takeover step below hits a wall. (You know the password here &mdash; <code>password</code> &mdash; so you can walk through; a stolen cookie cannot.) The real prize is your <strong>email</strong>: it is your recovery path, so if an attacker changed it silently, even your own &ldquo;Lost your password?&rdquo; reset would reach <em>them</em>. Change the password or email below &mdash; both demand your current password first, so your email stays yours. <em>Prove it:</em> log out, run &ldquo;Lost your password?&rdquo; for <code>admin</code>, sign back in, and open WP Mail Logging &mdash; the reset went to the original admin, not an attacker.';
 
 		$notices = array(
 			'profile'   => $profile,
-			'user'      => '<strong>Demo 2 &mdash; create a user.</strong> Creating a user is a consequential action too, so the same challenge guards it (confirm with ' . $cred . '). Then open <em>WP Mail Logging</em> in the menu to see the notification WordPress sent.',
-			'users'     => '<strong>Demo 3 &mdash; promote to Administrator.</strong> Edit <code>targetuser</code> and set Role to Administrator to see the same challenge.',
-			'user-edit' => '<strong>Demo 3 &mdash; promote to Administrator.</strong> Change this user\'s Role to Administrator and Update. Gated the same way &mdash; and notice you never need <em>their</em> password, only your own recent sign-in. The challenge guards the <em>action</em>, not one field.',
+			'user'      => '<strong>Backdoor attempt.</strong> Planting a fresh Administrator is the classic way to keep access &mdash; so creating a user is a consequential action too, gated the same way.',
+			'users'     => '<strong>Persistence attempt.</strong> Edit <code>targetuser</code> and set its Role to Administrator to hit the same wall.',
+			'user-edit' => '<strong>Persistence attempt.</strong> Set this user\'s Role to Administrator and Update &mdash; gated the same way, and it never needs <em>their</em> password, only the attacker\'s (which they do not have). The gate guards the <em>action</em>, not one field. (It closes account-takeover; note a hijacked <em>admin</em> could still install a plugin &mdash; deliberately out of scope for this MVP.)',
 		);
 
 		if ( isset( $notices[ $screen->id ] ) ) {
