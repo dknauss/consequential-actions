@@ -1,0 +1,43 @@
+{
+  "$schema": "https://playground.wordpress.net/blueprint-schema.json",
+  "meta": {
+    "title": "Consequential Actions — guided tour",
+    "author": "dknauss",
+    "description": "The full sequence: hardened force-logout reauthentication, plus a mail log so you can see the email-change confirmation and password notices WordPress emits — including the reset-email bypass path the ticket debates."
+  },
+  "landingPage": "/wp-admin/profile.php",
+  "preferredVersions": { "php": "8.3", "wp": "latest" },
+  "login": true,
+  "constants": { "CA_TERMINATE_SESSION": true },
+  "steps": [
+    {
+      "step": "installPlugin",
+      "pluginData": {
+        "resource": "url",
+        "url": "https://wordpress-playground-cors-proxy.net/?https://github.com/dknauss/consequential-actions/archive/refs/tags/v0.1.0.zip"
+      },
+      "options": { "activate": true, "targetFolderName": "consequential-actions" },
+      "ifAlreadyInstalled": "overwrite",
+      "progress": { "weight": 2, "caption": "Installing Consequential Actions" }
+    },
+    {
+      "step": "installPlugin",
+      "pluginData": { "resource": "wordpress.org/plugins", "slug": "wp-mail-logging" },
+      "options": { "activate": true },
+      "ifAlreadyInstalled": "overwrite",
+      "progress": { "weight": 2, "caption": "Installing WP Mail Logging" }
+    },
+    {
+      "step": "writeFile",
+      "path": "/wordpress/wp-content/mu-plugins/ca-narrator.php",
+      "data": {
+        "resource": "url",
+        "url": "https://raw.githubusercontent.com/dknauss/consequential-actions/v0.1.0/demo/mu-narrator.php"
+      }
+    },
+    {
+      "step": "wp-cli",
+      "command": "wp user create targetuser target@example.test --role=subscriber --user_pass=targetpass --display_name='Target User'"
+    }
+  ]
+}

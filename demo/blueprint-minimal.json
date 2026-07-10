@@ -1,0 +1,28 @@
+{
+  "$schema": "https://playground.wordpress.net/blueprint-schema.json",
+  "meta": {
+    "title": "Consequential Actions — minimal",
+    "author": "dknauss",
+    "description": "A single gated action: try changing your own password and watch it demand a fresh password confirmation before the change commits."
+  },
+  "landingPage": "/wp-admin/profile.php",
+  "preferredVersions": { "php": "8.3", "wp": "latest" },
+  "login": true,
+  "steps": [
+    {
+      "step": "installPlugin",
+      "pluginData": {
+        "resource": "url",
+        "url": "https://wordpress-playground-cors-proxy.net/?https://github.com/dknauss/consequential-actions/archive/refs/tags/v0.1.0.zip"
+      },
+      "options": { "activate": true, "targetFolderName": "consequential-actions" },
+      "ifAlreadyInstalled": "overwrite",
+      "progress": { "weight": 2, "caption": "Installing Consequential Actions" }
+    },
+    {
+      "step": "writeFile",
+      "path": "/wordpress/wp-content/mu-plugins/ca-demo-hint.php",
+      "data": "<?php\nadd_action( 'admin_notices', function () {\n\t$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;\n\tif ( ! $screen || 'profile' !== $screen->id ) {\n\t\treturn;\n\t}\n\techo '<div class=\"notice notice-info\"><p><strong>Demo:</strong> scroll to <em>New Password</em>, set a new password, and click <em>Update Profile</em>. Consequential Actions will require you to confirm your <em>current</em> password before the change is saved. Default admin password here is <code>password</code>.</p></div>';\n} );\n"
+    }
+  ]
+}

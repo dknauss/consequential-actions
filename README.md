@@ -1,0 +1,77 @@
+# Consequential Actions (Reauth MVP)
+
+A minimal, five-minute-readable demonstrator for a possible WordPress **core**
+primitive: *name a small catalog of consequential actions, then require a fresh
+proof of intent before they commit.* Built to make the argument in
+[Core Trac #20140](https://core.trac.wordpress.org/ticket/20140) concrete and
+runnable — not to be yet another standalone reauth plugin.
+
+> **This is a wedge, not a product.** For a maintained, production reauthentication
+> plugin that gates actions across admin/AJAX/REST and applies policy to
+> non-interactive surfaces, see [WP Sudo](https://wordpress.org/plugins/wp-sudo/).
+> This repo exists to show the *shape* of a core primitive at minimum size.
+
+## The idea, in two layers
+
+1. **Name the actions (Layer 1).** A stable, filterable registry of action IDs —
+   `core/change-own-password`, `core/change-user-password`, `core/create-user`,
+   `core/promote-user`, and so on. Useful on its own for auditing, UI, and policy,
+   even if nothing gates it. A real core version would be an Actions API.
+2. **Gate them (Layer 2).** Before an account-takeover action commits, require the
+   **acting user** to prove recent authentication. The credential checked is
+   always the current user's own password — *never* the target user's. That is the
+   correct security boundary (Trac #20140, comments 8–10): it proves who is at the
+   keyboard, and lets an admin edit another account without knowing its password.
+
+## Two modes
+
+| Mode | How to enable | Behavior |
+|------|---------------|----------|
+| **Window** (default) | — | Blocks the save and shows an inline "confirm your current password" field. A successful confirm opens a short (5-minute) sudo window. |
+| **Hardened** (force-logout) | `define( 'CA_TERMINATE_SESSION', true );` | An unconfirmed gated action signs the user out and forces a full reauthentication before they can retry — the stronger reading of Trac #20140 comment 31. |
+
+## Try it live (WordPress Playground)
+
+No install — runs entirely in your browser.
+
+- **Minimal** (one gated action, window mode):
+  [Open in Playground](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/v0.1.0/demo/blueprint-minimal.json)
+- **Guided tour** (force-logout + mail log showing the email-change confirmation
+  and the reset-email bypass path):
+  [Open in Playground](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/v0.1.0/demo/blueprint-tour.json)
+
+Both links pin to the immutable `v0.1.0` tag, so they keep working. The blueprints
+live in [`demo/`](demo/).
+
+## What this deliberately does NOT do
+
+No REST / Application Password / WP-CLI / cron policy. No request stash-and-replay.
+No 2FA / passkeys / modal. No multisite network-session semantics. Those are the
+heavy framework pieces this MVP argues core should not have to standardize all at
+once — and exactly what a full implementation (WP Sudo) takes on.
+
+## How it works
+
+Core hooks, no new machinery:
+
+- `show_user_profile` / `edit_user_profile` / `user_new_form` — render the inline
+  confirm field (window mode).
+- `user_profile_update_errors` — detect which consequential actions the submission
+  triggers and gate them (block-and-confirm, or force-logout).
+- `login_message` / `wp_login` — explain the forced logout and treat the fresh
+  login as recent authentication (hardened mode).
+
+## Status & next steps
+
+`v0.1.0` is a demonstrator. Known follow-ups before it would be a real plugin:
+
+- **Tests.** `triggered_actions()` is pure, testable business logic and should have
+  unit coverage (Brain\Monkey) before further changes — not yet added.
+- **Progressive enhancement.** A modal only when needed, instead of an always-present
+  inline field.
+- **The registry as its own thing.** Layer 1 deserves to be proposed to core
+  independently of the gate.
+
+## License
+
+GPL-2.0-or-later. See [LICENSE](LICENSE).
