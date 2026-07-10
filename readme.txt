@@ -3,7 +3,7 @@ Contributors: dknauss
 Tags: security, reauthentication, sudo, two-factor
 Requires at least: 6.4
 Requires PHP: 7.4
-Stable tag: 0.1.0
+Stable tag: 0.1.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -66,6 +66,12 @@ a named registry plus a thin gate, offered as a wedge for a core primitive rathe
 than as another standalone product.
 
 == Changelog ==
+
+= 0.1.1 =
+* Window mode: progressive-enhancement modal (no build step) collects the current
+  password on submit, so there is no scrolling to a bottom-of-page field and no
+  re-entry after a block. Inline field remains the no-JS fallback; the server-side
+  gate is unchanged and still authoritative.
 
 = 0.1.0 =
 * Initial wedge MVP: action registry + actor-password step-up on account-takeover

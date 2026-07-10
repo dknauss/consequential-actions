@@ -14,7 +14,7 @@
       "step": "installPlugin",
       "pluginData": {
         "resource": "url",
-        "url": "https://wordpress-playground-cors-proxy.net/?https://github.com/dknauss/consequential-actions/archive/refs/tags/v0.1.0.zip"
+        "url": "https://wordpress-playground-cors-proxy.net/?https://github.com/dknauss/consequential-actions/archive/refs/tags/v0.1.1.zip"
       },
       "options": { "activate": true, "targetFolderName": "consequential-actions" },
       "ifAlreadyInstalled": "overwrite",
@@ -32,7 +32,7 @@
       "path": "/wordpress/wp-content/mu-plugins/ca-narrator.php",
       "data": {
         "resource": "url",
-        "url": "https://raw.githubusercontent.com/dknauss/consequential-actions/v0.1.0/demo/mu-narrator.php"
+        "url": "https://raw.githubusercontent.com/dknauss/consequential-actions/v0.1.1/demo/mu-narrator.php"
       }
     },
     {

@@ -3,7 +3,7 @@
  * Plugin Name:       Consequential Actions (Reauth MVP)
  * Plugin URI:        https://github.com/dknauss/consequential-actions
  * Description:       Requires the acting user to re-confirm their current password before account-takeover actions (password/email change, user creation, promotion to administrator) commit. A minimal demonstrator for a possible WordPress core "consequential actions" registry + proof-of-intent primitive. See Trac #20140.
- * Version:           0.1.0
+ * Version:           0.1.1
  * Requires at least: 6.4
  * Requires PHP:      7.4
  * Author:            Dan Knauss
@@ -210,7 +210,10 @@ function render_field( $context = '' ) : void {
 	if ( terminate_mode() || confirmed_recently() ) {
 		return;
 	}
+	// #ca-fallback is the no-JS path; the enqueued modal script hides it and
+	// collects the same field via a dialog instead (progressive enhancement).
 	?>
+	<div id="ca-fallback">
 	<h2><?php esc_html_e( 'Confirm it is you', 'consequential-actions' ); ?></h2>
 	<table class="form-table" role="presentation">
 		<tr>
@@ -234,7 +237,58 @@ function render_field( $context = '' ) : void {
 			</td>
 		</tr>
 	</table>
+	</div>
 	<?php
+}
+
+/**
+ * Enqueue the optional modal enhancement (window mode only).
+ *
+ * The modal is pure UX: it collects the same confirm field and submits the same
+ * form, so the server-side gate in gate() remains the sole authority. With
+ * JavaScript off, #ca-fallback stays visible and the server still enforces —
+ * the modal never becomes the enforcement point.
+ *
+ * @param string $hook Current admin screen hook.
+ */
+function enqueue_modal( $hook ) : void {
+	if ( terminate_mode() || ! in_array( $hook, array( 'profile.php', 'user-edit.php', 'user-new.php' ), true ) ) {
+		return;
+	}
+
+	wp_enqueue_script(
+		'ca-modal',
+		plugins_url( 'assets/modal.js', __FILE__ ),
+		array(),
+		'0.1.1',
+		true
+	);
+
+	// Originals so the script can tell client-side whether a gated action is
+	// being attempted. Best-effort only — if detection misses, the server gate
+	// still catches it (a fallback round-trip), so this is a UX hint, not a check.
+	$screen_user = null;
+	if ( 'profile.php' === $hook ) {
+		$screen_user = wp_get_current_user();
+	} elseif ( 'user-edit.php' === $hook && isset( $_GET['user_id'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only UX hint, no state change.
+		$screen_user = get_userdata( (int) $_GET['user_id'] ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+	}
+
+	wp_localize_script(
+		'ca-modal',
+		'caModalData',
+		array(
+			'isCreate' => ( 'user-new.php' === $hook ),
+			'email'    => $screen_user ? strtolower( $screen_user->user_email ) : '',
+			'role'     => ( $screen_user && ! empty( $screen_user->roles ) ) ? (string) reset( $screen_user->roles ) : '',
+			'i18n'     => array(
+				'title'   => __( 'Confirm it is you', 'consequential-actions' ),
+				'label'   => __( 'Enter your current password to continue.', 'consequential-actions' ),
+				'confirm' => __( 'Confirm', 'consequential-actions' ),
+				'cancel'  => __( 'Cancel', 'consequential-actions' ),
+			),
+		)
+	);
 }
 
 /**
@@ -311,5 +365,6 @@ add_action( 'user_profile_update_errors', __NAMESPACE__ . '\\gate', 10, 3 );
 add_action( 'show_user_profile', __NAMESPACE__ . '\\render_field' );
 add_action( 'edit_user_profile', __NAMESPACE__ . '\\render_field' );
 add_action( 'user_new_form', __NAMESPACE__ . '\\render_field' );
+add_action( 'admin_enqueue_scripts', __NAMESPACE__ . '\\enqueue_modal' );
 add_filter( 'login_message', __NAMESPACE__ . '\\login_message' );
 add_action( 'wp_login', __NAMESPACE__ . '\\on_login', 10, 2 );

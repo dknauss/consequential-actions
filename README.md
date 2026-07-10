@@ -27,7 +27,7 @@ runnable — not to be yet another standalone reauth plugin.
 
 | Mode | How to enable | Behavior |
 |------|---------------|----------|
-| **Window** (default) | — | Blocks the save and shows an inline "confirm your current password" field. A successful confirm opens a short (5-minute) sudo window. |
+| **Window** (default) | — | On a gated submit, a modal asks for your current password and submits it with the form (no scrolling, no re-entry). With JavaScript off, an inline "confirm your current password" field is the fallback and the server still enforces. A successful confirm opens a short (5-minute) sudo window. |
 | **Hardened** (force-logout) | `define( 'CA_TERMINATE_SESSION', true );` | An unconfirmed gated action signs the user out and forces a full reauthentication before they can retry — the stronger reading of Trac #20140 comment 31. |
 
 ## Try it live (WordPress Playground)
@@ -35,10 +35,10 @@ runnable — not to be yet another standalone reauth plugin.
 No install — runs entirely in your browser.
 
 - **Minimal** (one gated action, window mode):
-  [Open in Playground](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/v0.1.0/demo/blueprint-minimal.json)
+  [Open in Playground](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/v0.1.1/demo/blueprint-minimal.json)
 - **Guided tour** (force-logout + mail log showing the email-change confirmation
   and the reset-email bypass path):
-  [Open in Playground](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/v0.1.0/demo/blueprint-tour.json)
+  [Open in Playground](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/v0.1.1/demo/blueprint-tour.json)
 
 Both links pin to the immutable `v0.1.0` tag, so they keep working. The blueprints
 live in [`demo/`](demo/).
@@ -55,7 +55,8 @@ once — and exactly what a full implementation (WP Sudo) takes on.
 Core hooks, no new machinery:
 
 - `show_user_profile` / `edit_user_profile` / `user_new_form` — render the inline
-  confirm field (window mode).
+  confirm field (window mode), progressively enhanced into a modal by a small
+  no-build script (`assets/modal.js`) that submits the same field to the same gate.
 - `user_profile_update_errors` — detect which consequential actions the submission
   triggers and gate them (block-and-confirm, or force-logout).
 - `login_message` / `wp_login` — explain the forced logout and treat the fresh
