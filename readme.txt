@@ -3,7 +3,7 @@ Contributors: dknauss
 Tags: security, reauthentication, sudo, two-factor
 Requires at least: 6.4
 Requires PHP: 7.4
-Stable tag: 0.1.6
+Stable tag: 0.2.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -37,12 +37,21 @@ administrator change another user's password without knowing it, while still
 proving who is at the keyboard, and it unifies password, email, create-user, and
 promotion under one idea.
 
-An optional hardened mode (define CA_TERMINATE_SESSION truthy) signs the user out
-and forces a full reauthentication instead of an inline confirm.
+The recommended primitive is that short window. An optional hardened mode (define
+CA_TERMINATE_SESSION truthy) instead signs the user out and forces a full
+reauthentication — a stricter opt-in for stolen-cookie-sensitive sites, not the
+default. (Trac #20140 comment 32 walks back the earlier "just terminate the
+session" idea in favor of the window.)
+
+The same gate covers the REST users routes (/wp/v2/users), for both cookie- and
+Application-Password-authenticated writes, so the block is on the consequential
+*action*, not one screen. A REST caller proves intent by resending with its own
+current password in ca_confirm_password, or by confirming once in wp-admin.
 
 == What this deliberately does NOT do ==
 
-* No REST / Application Password / WP-CLI / cron policy.
+* No WP-CLI / cron policy.
+* No per-surface REST policy tuning, and no interactive challenge for non-browser callers.
 * No request stash-and-replay.
 * No 2FA-aware challenge, passkeys, or modal.
 * No multisite network-session semantics.
@@ -66,6 +75,18 @@ a named registry plus a thin gate, offered as a wedge for a core primitive rathe
 than as another standalone product.
 
 == Changelog ==
+
+= 0.2.0 =
+* Coverage: the gate now also runs on the REST users routes (/wp/v2/users) via
+  rest_pre_dispatch, for cookie- and Application-Password-authenticated writes, so
+  a password/email change, user creation, or promotion is blocked the same way
+  whether it arrives through wp-admin or the API. A REST caller proves intent with
+  its own current password in ca_confirm_password, or by confirming in wp-admin to
+  open the shared window. Adds unit coverage for the REST detector.
+* Docs: reframe force-logout as a stricter opt-in, not "the stronger answer." The
+  recommended primitive is the short reauth window (Trac #20140 comment 32); a
+  session-bound window captures most of force-logout's assurance without the
+  lost-work cost.
 
 = 0.1.6 =
 * Security: promotion is now detected by capability, not the literal

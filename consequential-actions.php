@@ -3,7 +3,7 @@
  * Plugin Name:       Consequential Actions (Reauth MVP)
  * Plugin URI:        https://github.com/dknauss/consequential-actions
  * Description:       Requires the acting user to re-confirm their current password before account-takeover actions (password/email change, user creation, promotion to administrator) commit. A minimal demonstrator for a possible WordPress core "consequential actions" registry + proof-of-intent primitive. See Trac #20140.
- * Version:           0.1.6
+ * Version:           0.2.0
  * Requires at least: 6.4
  * Requires PHP:      7.4
  * Author:            Dan Knauss
@@ -18,17 +18,23 @@
  *             part; a real core version would be an Actions API).
  *   Layer 2 — GATE those actions with step-up reauthentication of the *actor*.
  *
- * Out of scope on purpose: REST / Application Passwords / WP-CLI / cron policy,
- * request stash-and-replay, 2FA-aware challenges, multisite network sessions.
- * Those are exactly the heavy framework pieces this MVP argues core should NOT
- * have to standardize in the same release. WP Sudo covers them for real sites.
+ * Surfaces: the same gate covers the admin user forms AND cookie- or
+ * application-password-authenticated writes to the REST users routes
+ * (/wp/v2/users), so the block is on the consequential *action*, not one screen —
+ * the "one guard, every surface" point this MVP exists to make. Still out of
+ * scope on purpose: WP-CLI / cron policy, request stash-and-replay, 2FA-aware
+ * challenges, multisite network sessions. Those are the heavy framework pieces
+ * this MVP argues core should NOT standardize in the same release; WP Sudo
+ * covers them for real sites.
  *
  * Two modes:
  *   - Default (window): block the save and show an inline "confirm your
  *     password" field; a successful confirm opens a short sudo window.
  *   - Hardened (force-logout): define CA_TERMINATE_SESSION truthy. An unconfirmed
  *     gated action logs the user out and forces a full reauthentication before
- *     they can retry. This is the stronger reading of Trac #20140 comment 31.
+ *     they can retry. This is a stricter opt-in for stolen-cookie-sensitive
+ *     sites; the recommended primitive — and the one proposed to core in Trac
+ *     #20140 comment 32 — is the short reauth *window*, not forced re-login.
  */
 
 namespace ConsequentialActions;
@@ -146,6 +152,134 @@ function triggered_actions( bool $is_update, $existing ) : array {
 	// phpcs:enable WordPress.Security.NonceVerification.Missing
 
 	return array_values( array_intersect( array_unique( $triggered ), array_keys( actions() ) ) );
+}
+
+/**
+ * Which consequential actions does a REST users write trigger?
+ *
+ * The REST twin of triggered_actions(). It reads the request's own field names
+ * (`password`, `email`, `roles`) instead of the admin form's ($_POST pass1/
+ * email/role), so the SAME catalog is enforced whether the change arrives
+ * through wp-admin or through /wp/v2/users. Kept pure (params array in, IDs out)
+ * so it is unit-testable without a live request.
+ *
+ * Creating any user is itself the consequential action — it is how a hijacked
+ * session plants a backdoor admin — so a create needs no field analysis.
+ *
+ * @param array<string,mixed> $params    Merged request params (WP_REST_Request::get_params()).
+ * @param bool                $is_update True for an update, false for a create.
+ * @param \WP_User|null       $existing  The user being updated, if any.
+ * @return string[] Triggered action IDs (subset of actions()).
+ */
+function triggered_actions_rest( array $params, bool $is_update, $existing ) : array {
+	if ( ! $is_update ) {
+		return array_values( array_intersect( array( 'core/create-user' ), array_keys( actions() ) ) );
+	}
+
+	$editing_self = $existing && get_current_user_id() === (int) $existing->ID;
+	$triggered    = array();
+
+	// New password: REST field is "password".
+	if ( isset( $params['password'] ) && is_string( $params['password'] ) && '' !== $params['password'] ) {
+		$triggered[] = $editing_self ? 'core/change-own-password' : 'core/change-user-password';
+	}
+
+	// Email change: REST field is "email". Compare to the stored address.
+	if ( isset( $params['email'] ) && is_string( $params['email'] ) && '' !== $params['email'] && $existing ) {
+		$new_email = sanitize_email( $params['email'] );
+		if ( $new_email && ! hash_equals( strtolower( $existing->user_email ), strtolower( $new_email ) ) ) {
+			$triggered[] = $editing_self ? 'core/change-own-email' : 'core/change-user-email';
+		}
+	}
+
+	// Promotion: REST field is "roles" (array). Only for users who can promote,
+	// and only when a role newly grants administrator-equivalent authority.
+	if ( ! empty( $params['roles'] ) && current_user_can( 'promote_users' ) ) {
+		$old_roles = ( $existing && ! empty( $existing->roles ) ) ? (array) $existing->roles : array();
+		foreach ( (array) $params['roles'] as $new_role ) {
+			$new_role = sanitize_key( (string) $new_role );
+			if ( '' !== $new_role && role_change_escalates( $new_role, $old_roles ) ) {
+				$triggered[] = 'core/promote-user';
+				break;
+			}
+		}
+	}
+
+	return array_values( array_intersect( array_unique( $triggered ), array_keys( actions() ) ) );
+}
+
+/**
+ * Layer 2 for REST — gate the users routes before dispatch.
+ *
+ * The point of this MVP is that the gate is on the *action*, not one form. So the
+ * same reauth rule that guards the admin user screens also guards writes to
+ * /wp/v2/users, whether the request is cookie-authenticated or uses an
+ * Application Password. A caller proves intent the same way as on the form: by
+ * sending THEIR OWN current password (never the target's) in ca_confirm_password
+ * — the one thing a hijacked session or a leaked Application Password cannot do.
+ * A recent confirm from either surface opens the shared sudo window, so a
+ * confirm in wp-admin also lets a follow-up REST call through for the window.
+ *
+ * @param mixed            $result  Dispatch result; non-null means already handled.
+ * @param \WP_REST_Server  $server  REST server (unused).
+ * @param \WP_REST_Request $request The request being dispatched.
+ * @return mixed Unchanged $result to proceed, or a WP_Error(403) to block.
+ */
+function gate_rest( $result, $server, $request ) {
+	// Only act on an otherwise-unhandled request from a logged-in user; let core
+	// return the normal 401 for anonymous requests.
+	if ( null !== $result || ! is_user_logged_in() || ! $request instanceof \WP_REST_Request ) {
+		return $result;
+	}
+
+	if ( ! preg_match( '#^/wp/v2/users(?:/(me|\d+))?$#', (string) $request->get_route(), $m ) ) {
+		return $result;
+	}
+	// Reads and DELETE pass through (delete-user is not in this MVP catalog).
+	if ( ! in_array( $request->get_method(), array( 'POST', 'PUT', 'PATCH' ), true ) ) {
+		return $result;
+	}
+
+	$target_seg = $m[1] ?? '';
+	$is_update  = ( '' !== $target_seg ); // POST/PUT to /users/<id|me> = update; POST to /users = create.
+	$existing   = null;
+	if ( $is_update ) {
+		$id       = ( 'me' === $target_seg ) ? get_current_user_id() : (int) $target_seg;
+		$existing = $id ? get_userdata( $id ) : null;
+	}
+
+	$triggered = triggered_actions_rest( (array) $request->get_params(), $is_update, $existing );
+	if ( empty( $triggered ) || confirmed_recently() ) {
+		return $result;
+	}
+
+	// Inline confirm: the actor's OWN current password, sent with the request.
+	$password = $request->get_param( CONFIRM_FIELD );
+	if ( is_string( $password ) && '' !== $password ) {
+		$actor = wp_get_current_user();
+		if ( wp_check_password( $password, $actor->user_pass, $actor->ID ) ) {
+			mark_confirmed( (int) $actor->ID );
+			return $result;
+		}
+	}
+
+	$labels = array_map(
+		static function ( $id ) {
+			$catalog = actions();
+			return $catalog[ $id ]['label'];
+		},
+		$triggered
+	);
+
+	return new \WP_Error(
+		'ca_reauth_required',
+		sprintf(
+			/* translators: %s: comma-separated list of action labels. */
+			__( 'Reauthentication required before: %s. Resend the request with your current password in the "ca_confirm_password" field, or confirm once in wp-admin to open a short window.', 'consequential-actions' ),
+			implode( ', ', $labels )
+		),
+		array( 'status' => 403, 'actions' => $triggered )
+	);
 }
 
 /**
@@ -345,7 +479,7 @@ function enqueue_modal( $hook ) : void {
 		'ca-modal',
 		plugins_url( 'assets/modal.js', __FILE__ ),
 		array(),
-		'0.1.6',
+		'0.2.0',
 		true
 	);
 
@@ -448,6 +582,7 @@ function mark_confirmed( int $user_id ) : void {
 }
 
 add_action( 'user_profile_update_errors', __NAMESPACE__ . '\\gate', 10, 3 );
+add_filter( 'rest_pre_dispatch', __NAMESPACE__ . '\\gate_rest', 10, 3 );
 add_action( 'show_user_profile', __NAMESPACE__ . '\\render_field' );
 add_action( 'edit_user_profile', __NAMESPACE__ . '\\render_field' );
 add_action( 'user_new_form', __NAMESPACE__ . '\\render_field' );
