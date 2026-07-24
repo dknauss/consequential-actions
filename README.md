@@ -72,11 +72,15 @@ could not be silently hijacked.
 The gate closes the **account-takeover** class; it does not make a hijacked *admin*
 omnipotent (that admin could still install a plugin — out of scope for this MVP).
 
-[**Open in Playground**](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/main/demo/blueprint.json)
+[**Open in Playground**](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/main/demo/blueprint.json) &nbsp;·&nbsp; [Stable fallback (pinned `v0.2.1`)](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/v0.2.1/demo/blueprint-pinned.json)
 
-The link tracks `main`, and the blueprint it loads installs the plugin from `main`
-too — so the live demo always runs current code (including the REST walkthrough)
-rather than a stale pinned release. The blueprint lives in [`demo/`](demo/).
+The primary link tracks `main`, and the blueprint it loads installs the plugin
+from `main` too — so the live demo always runs current code (including the REST
+walkthrough) rather than a stale pinned release. The **stable fallback** pins
+every source (plugin, narrator, blueprint) to the immutable `v0.2.1` tag, so it
+keeps working even if `main` is temporarily broken. Both blueprints live in
+[`demo/`](demo/). (Maintainer note: the fallback resolves once the `v0.2.1` tag
+is cut; bump it to the current release tag each release.)
 
 ## What this deliberately does NOT do
 
