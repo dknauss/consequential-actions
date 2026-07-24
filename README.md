@@ -112,8 +112,9 @@ Core hooks, no new machinery:
 
 `v0.2.0` is a demonstrator. Status of the follow-ups:
 
-- **Tests.** ✅ `triggered_actions()`, its REST twin `triggered_actions_rest()`, and
-  the sudo-window helpers have Brain\Monkey unit coverage
+- **Tests.** ✅ `triggered_actions()`, its REST twin `triggered_actions_rest()`,
+  the sudo-window helpers, and the `actions()` registry metadata contract have
+  Brain\Monkey unit coverage
   (`tests/TriggeredActionsTest.php`, `tests/RestTriggeredActionsTest.php`). Run with
   `composer install && composer test`.
 - **REST coverage.** ✅ `rest_pre_dispatch` gates `/wp/v2/users` writes with the same

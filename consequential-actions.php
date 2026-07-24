@@ -95,8 +95,10 @@ function terminate_mode() : bool {
  * The shape is standalone on purpose: a core version exposes these through a
  * single query surface that ALSO reads consequence-annotated abilities, but at
  * wedge scale there are no consequential core abilities to union in, so modelling
- * that surface here would be pure overhead. See the WP Sudo core spec and
- * `core-actions-registry-vs-abilities-decision.md` for that union design.
+ * that surface here would be pure overhead. For the union design see the WP Sudo
+ * core spec (https://github.com/dknauss/Sudo/blob/main/docs/core-sudo-gate-implementation-spec.md)
+ * and the registry-vs-Abilities decision memo, committed at
+ * https://github.com/dknauss/Sudo/blob/cee2cc9730366bec9dda71683bae03bd92795f80/docs/core-actions-registry-vs-abilities-decision.md .
  *
  * @return array<string,array{
  *     label:string,
