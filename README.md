@@ -15,7 +15,9 @@ runnable — not to be yet another standalone reauth plugin.
 
 1. **Name the actions (Layer 1).** A stable, filterable registry of action IDs —
    `core/change-own-password`, `core/change-user-password`, `core/create-user`,
-   `core/promote-user`, and so on. Useful on its own for auditing, UI, and policy,
+   `core/promote-user`, and so on — each carrying the metadata a core Actions API
+   would register (capabilities, category, consequence class, scope, annotations).
+   Useful on its own for auditing, UI, and policy,
    even if nothing gates it. A real core version would be an Actions API.
 2. **Gate them (Layer 2).** Before an account-takeover action commits, require the
    **acting user** to prove recent authentication. The credential checked is
