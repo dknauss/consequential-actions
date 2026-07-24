@@ -85,6 +85,11 @@ than as another standalone product.
   a Make/Core post. No behavior change; the `consequential_actions` filter now
   receives the richer arrays (label remains present, so existing filters keep
   working).
+* Demo: the Playground blueprint now tracks main instead of the stale v0.1.6 pin
+  (so the live demo actually runs the current REST-gating code), and the
+  profile-screen narration includes a paste-into-DevTools snippet that attempts
+  the same password takeover over POST /wp/v2/users/me and shows the resulting
+  403 ca_reauth_required — the same gate over REST as on the form.
 
 = 0.2.0 =
 * Coverage: the gate now also runs on the REST users routes (/wp/v2/users) via

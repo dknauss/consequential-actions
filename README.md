@@ -121,9 +121,11 @@ Core hooks, no new machinery:
   the inline field is the no-JS fallback.
 - **The registry as its own thing.** Layer 1 deserves to be proposed to core
   independently of the gate — still open.
-- **Exercise REST in the live demo.** The one-click Playground still walks the
-  *form* takeover; adding a REST step (curl the same takeover, watch it 403) is the
-  next demo change — still open.
+- **Exercise REST in the live demo.** ✅ Done (v0.2.1). The profile-screen narration
+  now includes a paste-into-DevTools snippet that attempts the same password
+  takeover over `POST /wp/v2/users/me` and logs the `403 ca_reauth_required` — the
+  gate on the action, not the form. (The blueprint also now tracks `main` instead
+  of the stale `v0.1.6` pin, so the live demo runs the current code.)
 
 ## License
 
