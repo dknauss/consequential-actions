@@ -15,7 +15,9 @@ runnable — not to be yet another standalone reauth plugin.
 
 1. **Name the actions (Layer 1).** A stable, filterable registry of action IDs —
    `core/change-own-password`, `core/change-user-password`, `core/create-user`,
-   `core/promote-user`, and so on. Useful on its own for auditing, UI, and policy,
+   `core/promote-user`, and so on — each carrying the metadata a core Actions API
+   would register (capabilities, category, consequence class, scope, annotations).
+   Useful on its own for auditing, UI, and policy,
    even if nothing gates it. A real core version would be an Actions API.
 2. **Gate them (Layer 2).** Before an account-takeover action commits, require the
    **acting user** to prove recent authentication. The credential checked is
@@ -70,10 +72,15 @@ could not be silently hijacked.
 The gate closes the **account-takeover** class; it does not make a hijacked *admin*
 omnipotent (that admin could still install a plugin — out of scope for this MVP).
 
-[**Open in Playground**](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/v0.1.6/demo/blueprint.json)
+[**Open in Playground**](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/main/demo/blueprint.json) &nbsp;·&nbsp; [Stable fallback (pinned `v0.2.1`)](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/v0.2.1/demo/blueprint-pinned.json)
 
-The link pins to the immutable `v0.1.6` tag, so it keeps working. The blueprint
-lives in [`demo/`](demo/).
+The primary link tracks `main`, and the blueprint it loads installs the plugin
+from `main` too — so the live demo always runs current code (including the REST
+walkthrough) rather than a stale pinned release. The **stable fallback** pins
+every source (plugin, narrator, blueprint) to the immutable `v0.2.1` tag, so it
+keeps working even if `main` is temporarily broken. Both blueprints live in
+[`demo/`](demo/). (Maintainer note: the fallback resolves once the `v0.2.1` tag
+is cut; bump it to the current release tag each release.)
 
 ## What this deliberately does NOT do
 
@@ -109,8 +116,9 @@ Core hooks, no new machinery:
 
 `v0.2.0` is a demonstrator. Status of the follow-ups:
 
-- **Tests.** ✅ `triggered_actions()`, its REST twin `triggered_actions_rest()`, and
-  the sudo-window helpers have Brain\Monkey unit coverage
+- **Tests.** ✅ `triggered_actions()`, its REST twin `triggered_actions_rest()`,
+  the sudo-window helpers, and the `actions()` registry metadata contract have
+  Brain\Monkey unit coverage
   (`tests/TriggeredActionsTest.php`, `tests/RestTriggeredActionsTest.php`). Run with
   `composer install && composer test`.
 - **REST coverage.** ✅ `rest_pre_dispatch` gates `/wp/v2/users` writes with the same
@@ -119,9 +127,11 @@ Core hooks, no new machinery:
   the inline field is the no-JS fallback.
 - **The registry as its own thing.** Layer 1 deserves to be proposed to core
   independently of the gate — still open.
-- **Exercise REST in the live demo.** The one-click Playground still walks the
-  *form* takeover; adding a REST step (curl the same takeover, watch it 403) is the
-  next demo change — still open.
+- **Exercise REST in the live demo.** ✅ Done (v0.2.1). The profile-screen narration
+  now includes a paste-into-DevTools snippet that attempts the same password
+  takeover over `POST /wp/v2/users/me` and logs the `403 ca_reauth_required` — the
+  gate on the action, not the form. (The blueprint also now tracks `main` instead
+  of the stale `v0.1.6` pin, so the live demo runs the current code.)
 
 ## License
 

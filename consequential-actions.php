@@ -3,7 +3,7 @@
  * Plugin Name:       Consequential Actions (Reauth MVP)
  * Plugin URI:        https://github.com/dknauss/consequential-actions
  * Description:       Requires the acting user to re-confirm their current password before account-takeover actions (password/email change, user creation, promotion to administrator) commit. A minimal demonstrator for a possible WordPress core "consequential actions" registry + proof-of-intent primitive. See Trac #20140.
- * Version:           0.2.0
+ * Version:           0.2.1
  * Requires at least: 6.4
  * Requires PHP:      7.4
  * Author:            Dan Knauss
@@ -86,22 +86,76 @@ function terminate_mode() : bool {
  * wedge: it is useful on its own (audit trails, UI affordances, policy tooling)
  * even if nothing ever gates it. Everything below is just one possible consumer.
  *
- * @return array<string,array{label:string}>
+ * Each entry carries the metadata shape a core Actions API would register
+ * (label, capabilities, category, consequence_class, scope, annotations), so the
+ * catalog literal is a faithful preview of Layer 1 and can be lifted toward the
+ * core proposal unchanged. This MVP only reads `label`; the other fields are
+ * deliberately unused here — they exist so the "this is what registration looks
+ * like" story is consistent across demo, the core spec, and any Make/Core post.
+ * The shape is standalone on purpose: a core version exposes these through a
+ * single query surface that ALSO reads consequence-annotated abilities, but at
+ * wedge scale there are no consequential core abilities to union in, so modelling
+ * that surface here would be pure overhead. For the union design see the WP Sudo
+ * core spec (https://github.com/dknauss/Sudo/blob/main/docs/core-sudo-gate-implementation-spec.md)
+ * and the registry-vs-Abilities decision memo, committed at
+ * https://github.com/dknauss/Sudo/blob/cee2cc9730366bec9dda71683bae03bd92795f80/docs/core-actions-registry-vs-abilities-decision.md .
+ *
+ * @return array<string,array{
+ *     label:string,
+ *     capabilities:string[],
+ *     category:string,
+ *     consequence_class:string,
+ *     scope:string,
+ *     annotations:array{destructive:bool,requires_recent_auth:bool}
+ * }>
  */
 function actions() : array {
+	$users_defaults = array(
+		'category'    => 'user-management',
+		'scope'       => 'users',
+		'annotations' => array(
+			'destructive'          => false,
+			'requires_recent_auth' => true,
+		),
+	);
+
 	$actions = array(
-		'core/change-own-password'  => array( 'label' => __( 'Change your password', 'consequential-actions' ) ),
-		'core/change-own-email'     => array( 'label' => __( 'Change your email address', 'consequential-actions' ) ),
-		'core/change-user-password' => array( 'label' => __( "Change another user's password", 'consequential-actions' ) ),
-		'core/change-user-email'    => array( 'label' => __( "Change another user's email address", 'consequential-actions' ) ),
-		'core/create-user'          => array( 'label' => __( 'Create a user', 'consequential-actions' ) ),
-		'core/promote-user'         => array( 'label' => __( 'Grant administrator privileges', 'consequential-actions' ) ),
+		'core/change-own-password'  => array(
+			'label'             => __( 'Change your password', 'consequential-actions' ),
+			'capabilities'      => array( 'edit_user' ),
+			'consequence_class' => 'account-takeover',
+		) + $users_defaults,
+		'core/change-own-email'     => array(
+			'label'             => __( 'Change your email address', 'consequential-actions' ),
+			'capabilities'      => array( 'edit_user' ),
+			'consequence_class' => 'account-takeover',
+		) + $users_defaults,
+		'core/change-user-password' => array(
+			'label'             => __( "Change another user's password", 'consequential-actions' ),
+			'capabilities'      => array( 'edit_user' ),
+			'consequence_class' => 'account-takeover',
+		) + $users_defaults,
+		'core/change-user-email'    => array(
+			'label'             => __( "Change another user's email address", 'consequential-actions' ),
+			'capabilities'      => array( 'edit_user' ),
+			'consequence_class' => 'account-takeover',
+		) + $users_defaults,
+		'core/create-user'          => array(
+			'label'             => __( 'Create a user', 'consequential-actions' ),
+			'capabilities'      => array( 'create_users' ),
+			'consequence_class' => 'privilege-escalation',
+		) + $users_defaults,
+		'core/promote-user'         => array(
+			'label'             => __( 'Grant administrator privileges', 'consequential-actions' ),
+			'capabilities'      => array( 'promote_users' ),
+			'consequence_class' => 'privilege-escalation',
+		) + $users_defaults,
 	);
 
 	/**
 	 * Filter the consequential-actions catalog.
 	 *
-	 * @param array<string,array{label:string}> $actions Map of action ID => metadata.
+	 * @param array<string,array{label:string,capabilities:string[],category:string,consequence_class:string,scope:string,annotations:array{destructive:bool,requires_recent_auth:bool}}> $actions Map of action ID => metadata.
 	 */
 	return (array) apply_filters( 'consequential_actions', $actions );
 }
@@ -479,7 +533,7 @@ function enqueue_modal( $hook ) : void {
 		'ca-modal',
 		plugins_url( 'assets/modal.js', __FILE__ ),
 		array(),
-		'0.2.0',
+		'0.2.1',
 		true
 	);
 

@@ -58,5 +58,30 @@ add_action(
 		if ( isset( $notices[ $screen->id ] ) ) {
 			echo '<div class="notice notice-info"><p>' . wp_kses_post( $notices[ $screen->id ] ) . '</p></div>';
 		}
+
+		// Same takeover, but over the REST API — the whole point of the MVP is that
+		// the gate lives on the action, not one form. On the profile screen, offer a
+		// paste-into-DevTools snippet that attempts the password change via
+		// POST /wp/v2/users/me and prints the 403 the gate returns.
+		if ( 'profile' === $screen->id ) {
+			$nonce   = wp_create_nonce( 'wp_rest' );
+			$snippet = "fetch('/wp-json/wp/v2/users/me', {\n"
+				. "  method: 'POST',\n"
+				. "  headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': '" . $nonce . "' },\n"
+				. "  credentials: 'same-origin',\n"
+				. "  body: JSON.stringify({ password: 'hijacked-by-attacker' })\n"
+				. "}).then(r => r.json().then(j => console.log(r.status, j.code, j.message)));";
+
+			echo '<div class="notice notice-info"><p><strong>Prove it over the REST API.</strong> '
+				. 'The wall is not the form &mdash; it is the action. Open your browser DevTools '
+				. 'console on this page and paste this to attempt the same password takeover over '
+				. '<code>POST /wp/v2/users/me</code>:</p>'
+				. '<pre style="white-space:pre-wrap;overflow-x:auto">' . esc_html( $snippet ) . '</pre>'
+				. '<p>It logs <code>403 ca_reauth_required</code> &mdash; blocked exactly like the form, '
+				. 'because the same rule runs on the REST route. Add '
+				. '<code>ca_confirm_password: \'password\'</code> to the JSON body and it succeeds: '
+				. 'intent proven with the actor&rsquo;s own password, the same test the dialog applies. '
+				. '(One guard, every surface &mdash; the chokepoint thesis the core spec argues.)</p></div>';
+		}
 	}
 );

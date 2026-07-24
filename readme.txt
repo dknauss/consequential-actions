@@ -3,7 +3,7 @@ Contributors: dknauss
 Tags: security, reauthentication, sudo, two-factor
 Requires at least: 6.4
 Requires PHP: 7.4
-Stable tag: 0.2.0
+Stable tag: 0.2.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -75,6 +75,21 @@ a named registry plus a thin gate, offered as a wedge for a core primitive rathe
 than as another standalone product.
 
 == Changelog ==
+
+= 0.2.1 =
+* Registry: each catalog entry now carries the full metadata shape a core Actions
+  API would register (label, capabilities, category, consequence_class, scope,
+  annotations) instead of a bare label. The MVP still only reads `label`; the
+  other fields are a deliberate, unused-here preview so the "this is what
+  registration looks like" story is identical across the demo, the core spec, and
+  a Make/Core post. No behavior change; the `consequential_actions` filter now
+  receives the richer arrays (label remains present, so existing filters keep
+  working).
+* Demo: the Playground blueprint now tracks main instead of the stale v0.1.6 pin
+  (so the live demo actually runs the current REST-gating code), and the
+  profile-screen narration includes a paste-into-DevTools snippet that attempts
+  the same password takeover over POST /wp/v2/users/me and shows the resulting
+  403 ca_reauth_required — the same gate over REST as on the form.
 
 = 0.2.0 =
 * Coverage: the gate now also runs on the REST users routes (/wp/v2/users) via
