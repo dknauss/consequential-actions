@@ -72,10 +72,11 @@ could not be silently hijacked.
 The gate closes the **account-takeover** class; it does not make a hijacked *admin*
 omnipotent (that admin could still install a plugin — out of scope for this MVP).
 
-[**Open in Playground**](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/v0.1.6/demo/blueprint.json)
+[**Open in Playground**](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/main/demo/blueprint.json)
 
-The link pins to the immutable `v0.1.6` tag, so it keeps working. The blueprint
-lives in [`demo/`](demo/).
+The link tracks `main`, and the blueprint it loads installs the plugin from `main`
+too — so the live demo always runs current code (including the REST walkthrough)
+rather than a stale pinned release. The blueprint lives in [`demo/`](demo/).
 
 ## What this deliberately does NOT do
 
