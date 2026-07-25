@@ -404,6 +404,43 @@ function role_change_escalates( string $new_role, array $old_roles ) : bool {
 }
 
 /**
+ * Which selected users would a Users-list bulk "promote" escalate to
+ * administrator-equivalent authority?
+ *
+ * The pure detector behind gating the bulk "Change role" action (issue #3). Given
+ * the new role key, the selected ids, and a per-user current-roles lookup, it
+ * returns the subset whose promotion escalates — reusing role_change_escalates(),
+ * so a privileged CUSTOM role counts, not just the literal "administrator" slug.
+ * Side-effect-free and lookup-injected so it is unit-testable without a live
+ * request (the caller wires get_userdata()).
+ *
+ * @param string   $new_role Role key assigned to every selected user (matched
+ *                           exactly, case-preserving — see below).
+ * @param int[]    $user_ids Selected user ids.
+ * @param callable $roles_of fn(int $id): string[] — the user's current role slugs.
+ * @return int[] Subset of $user_ids whose promotion escalates.
+ */
+function escalating_bulk_targets( string $new_role, array $user_ids, callable $roles_of ) : array {
+	// Match the role key EXACTLY as core does: wp-admin/users.php assigns the raw
+	// submitted new_role (validated against get_editable_roles()); lowercasing it
+	// with sanitize_key() would miss a mixed-case custom role key and leave that
+	// promotion ungated. get_role() validates existence downstream.
+	if ( '' === $new_role ) {
+		return array();
+	}
+
+	$escalating = array();
+	foreach ( $user_ids as $id ) {
+		$id = (int) $id;
+		if ( $id > 0 && role_change_escalates( $new_role, (array) $roles_of( $id ) ) ) {
+			$escalating[] = $id;
+		}
+	}
+
+	return $escalating;
+}
+
+/**
  * Layer 2 — the gate. Runs during user create/edit validation.
  *
  * If any consequential action is triggered and the acting user has not proven
@@ -467,6 +504,157 @@ function gate( $errors, $update, $user ) : void {
 			esc_html__( 'Please confirm your current password to proceed with: %s.', 'consequential-actions' ),
 			implode( ', ', $labels )
 		)
+	);
+}
+
+/**
+ * Layer 2 for the Users-list bulk action — gate "Change role → …" before it runs.
+ *
+ * The single-user form (gate()) and REST (gate_rest()) paths are covered, but the
+ * Users-list BULK promote submits `changeit` + `new_role` + `users[]` to
+ * wp-admin/users.php, which calls WP_User::set_role() directly and NEVER fires
+ * user_profile_update_errors. This runs on load-users.php — which core fires from
+ * admin.php BEFORE users.php processes the bulk action — and blocks a promotion
+ * that escalates a user to administrator-equivalent authority unless the actor
+ * proves recent intent. Nothing is mutated at block time.
+ *
+ * Confirm path: an inline interstitial. Because the bulk screen has no password
+ * field, an unconfirmed escalation is answered with a small challenge page that
+ * re-POSTs the same bulk request plus the actor's current password; a correct
+ * password lets that request through (and opens the shared window if one is
+ * enabled). This works in every window mode, including `ca_sudo_window` = 0.
+ *
+ * Like the form/REST gates, the confirm is NOT rate-limited — throttling and
+ * lockouts are the framework hardening this wedge deliberately leaves to WP Sudo.
+ *
+ * Scope is deliberately narrow: single-site, interactive admin only. Programmatic
+ * set_role() and WP-CLI/cron stay WP Sudo's domain; the network Users screen (also
+ * $pagenow = users.php) has no role bulk action, so is_network_admin() is skipped.
+ */
+function gate_bulk_promote() : void {
+	if ( is_network_admin() ) {
+		return;
+	}
+
+	// Core's WP_Users_List_Table::current_action() returns 'promote' whenever the
+	// "Change role to…" button (`changeit`) is set — NOT via action=promote. Mirror
+	// that exactly, or the gate misses the real path.
+	if ( ! isset( $_REQUEST['changeit'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- nonce verified below before any effect.
+		return;
+	}
+
+	if ( ! current_user_can( 'promote_users' ) ) {
+		return;
+	}
+
+	// Genuine bulk submission only; core guards the same action with this nonce.
+	check_admin_referer( 'bulk-users' );
+
+	// Raw role key (unslashed, NOT sanitize_key'd), to match exactly what core
+	// assigns — see escalating_bulk_targets(). Only used for get_role() lookup and
+	// esc_attr() output, both safe with an arbitrary string.
+	$new_role = isset( $_REQUEST['new_role'] ) ? (string) wp_unslash( $_REQUEST['new_role'] ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended,WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- nonce verified above; role validated by get_role() and escaped on output.
+	$user_ids = isset( $_REQUEST['users'] ) ? array_map( 'intval', (array) wp_unslash( $_REQUEST['users'] ) ) : array();
+	if ( '' === $new_role || empty( $user_ids ) ) {
+		return; // Nothing actionable (incl. demotion to "none"); let core handle it.
+	}
+
+	// If the registry filter removed core/promote-user, do not gate — stay
+	// consistent with the form/REST detectors, which intersect with actions().
+	$catalog = actions();
+	if ( ! isset( $catalog['core/promote-user'] ) ) {
+		return;
+	}
+
+	$escalating = escalating_bulk_targets(
+		$new_role,
+		$user_ids,
+		static function ( int $id ) : array {
+			$user = get_userdata( $id );
+			return ( $user && ! empty( $user->roles ) ) ? (array) $user->roles : array();
+		}
+	);
+	if ( empty( $escalating ) ) {
+		return; // No admin-equivalent escalation; not a consequential action.
+	}
+
+	// Intent already proven within an open window → allow.
+	if ( confirmed_recently() ) {
+		return;
+	}
+
+	$label = (string) $catalog['core/promote-user']['label'];
+	$actor = wp_get_current_user();
+
+	// Hardened mode: force a full reauthentication instead of an inline confirm, so
+	// the bulk surface matches gate() — the fresh login pipeline (2FA) is the whole
+	// point of CA_TERMINATE_SESSION. on_login consumes the pending marker and opens
+	// the window, so retrying the bulk change after re-login passes.
+	if ( terminate_mode() ) {
+		set_transient( pending_key( (int) $actor->ID ), 1, 15 * MINUTE_IN_SECONDS );
+		wp_logout();
+		wp_safe_redirect( add_query_arg( 'ca_reauth', '1', wp_login_url( admin_url( 'users.php' ) ) ) );
+		exit;
+	}
+
+	// Inline confirm re-POSTed with the bulk request? Verify the actor's password.
+	$password = isset( $_REQUEST[ CONFIRM_FIELD ] ) ? (string) wp_unslash( $_REQUEST[ CONFIRM_FIELD ] ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- nonce verified above.
+	$error    = '';
+	if ( '' !== $password ) {
+		if ( wp_check_password( $password, $actor->user_pass, $actor->ID ) ) {
+			mark_confirmed( (int) $actor->ID );
+			return; // Allow — core proceeds to set_role().
+		}
+		$error = __( 'The password you entered is incorrect. Please try again.', 'consequential-actions' );
+	}
+
+	bulk_promote_challenge( $label, $new_role, $user_ids, $error );
+}
+
+/**
+ * Render the inline confirm interstitial for a gated bulk role change and exit.
+ *
+ * A small challenge page that re-POSTs the original bulk request (new_role, the
+ * selected users, a fresh bulk-users nonce, and the `changeit` trigger core keys
+ * off) together with the actor's current password, back to wp-admin/users.php.
+ * Re-entry lands in gate_bulk_promote(), which verifies the password and lets the
+ * request through. POST (not GET) keeps the password out of the URL.
+ *
+ * @param string $label    The action label, e.g. "Grant administrator privileges".
+ * @param string $new_role Target role key to re-submit.
+ * @param int[]  $user_ids Selected user ids to re-submit.
+ * @param string $error    Optional error to show above the field (plain text).
+ */
+function bulk_promote_challenge( string $label, string $new_role, array $user_ids, string $error = '' ) : void {
+	$fields  = wp_nonce_field( 'bulk-users', '_wpnonce', true, false );
+	$fields .= '<input type="hidden" name="new_role" value="' . esc_attr( $new_role ) . '" />';
+	foreach ( $user_ids as $id ) {
+		$fields .= '<input type="hidden" name="users[]" value="' . (int) $id . '" />';
+	}
+
+	$intro = sprintf(
+		/* translators: %s: the action label, e.g. "Grant administrator privileges". */
+		__( 'Reauthentication required before: %s. Confirm your current password to continue with this bulk role change.', 'consequential-actions' ),
+		$label
+	);
+
+	$html = '<p>' . esc_html( $intro ) . '</p>';
+	if ( '' !== $error ) {
+		$html .= '<p style="color:#b32d2e;font-weight:600;">' . esc_html( $error ) . '</p>';
+	}
+	$html .= '<form method="post" action="' . esc_url( admin_url( 'users.php' ) ) . '">';
+	$html .= $fields;
+	$html .= '<p><label for="ca_confirm_password">' . esc_html__( 'Current password', 'consequential-actions' ) . '</label><br />';
+	$html .= '<input type="password" id="ca_confirm_password" name="' . esc_attr( CONFIRM_FIELD ) . '" autocomplete="current-password" required /></p>';
+	$html .= '<p><button type="submit" name="changeit" value="1" class="button button-primary">' . esc_html__( 'Confirm and change role', 'consequential-actions' ) . '</button></p>';
+	$html .= '</form>';
+
+	// $html is assembled from escaped parts above; wp_die() renders a string
+	// message as HTML, so no further escaping (which would corrupt the markup).
+	wp_die(
+		$html, // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- built from escaped fragments.
+		esc_html__( 'Confirmation required', 'consequential-actions' ),
+		array( 'response' => 403 )
 	);
 }
 
@@ -636,6 +824,7 @@ function mark_confirmed( int $user_id ) : void {
 }
 
 add_action( 'user_profile_update_errors', __NAMESPACE__ . '\\gate', 10, 3 );
+add_action( 'load-users.php', __NAMESPACE__ . '\\gate_bulk_promote' );
 add_filter( 'rest_pre_dispatch', __NAMESPACE__ . '\\gate_rest', 10, 3 );
 add_action( 'show_user_profile', __NAMESPACE__ . '\\render_field' );
 add_action( 'edit_user_profile', __NAMESPACE__ . '\\render_field' );
