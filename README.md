@@ -8,8 +8,47 @@ runnable — not to be yet another standalone reauth plugin.
 
 > **This is a wedge, not a product.** For a maintained, production reauthentication
 > plugin that gates actions across admin/AJAX/REST and applies policy to
-> non-interactive surfaces, see [WP Sudo](https://wordpress.org/plugins/wp-sudo/).
+> non-interactive surfaces, see [WP Sudo](https://github.com/dknauss/Sudo).
 > This repo exists to show the *shape* of a core primitive at minimum size.
+
+## Scope and guarantees
+
+This prototype **demonstrates** proof-of-intent on the surfaces below. It is not a
+complete action-gating control, and the table is the honest boundary — read it
+before relying on any single claim elsewhere in this README. What the gate covers
+today:
+
+| Surface | Operation | Gated? | Reauth mode | Tested |
+|---|---|:---:|---|:---:|
+| Profile / edit-user / new-user form | Change own/other password or email, promote a user to an admin-equivalent role, create user | ✅ | Window (default) or hardened force-logout | Unit (detection) |
+| REST `/wp/v2/users` (cookie & Application Password) | Same account-takeover changes | ✅ | Shared window; actor password in the request only when the window is closed (else `403`) | Unit (detection) |
+| Users list — **bulk** "Change role → Administrator" | Promote to admin-equivalent | ❌ | — | — |
+| Direct `set_role()` / `add_role()` / custom PHP | Promote / role change | ❌ *(out of scope — WP Sudo's domain)* | — | — |
+| WP-CLI, cron | Any change | ❌ *(out of scope by design)* | — | — |
+
+**Known gaps (not yet gated):**
+
+- **Bulk role promotion on the Users list is ungated** — it reaches `set_role()`
+  directly and never fires the `user_profile_update_errors` hook the form gate
+  relies on. This is a real bypass of the enumerated-surface goal, tracked in
+  [issue #3](https://github.com/dknauss/consequential-actions/issues/3); the planned
+  fix intercepts the bulk `promote` action on the Users screen *before* it runs and
+  routes it through the same shared confirm window. Gating *arbitrary* programmatic
+  `set_role()` from custom code is a different, effect-level problem left to WP Sudo
+  (the `set_role()` row above).
+- **Hardened force-logout is classic-admin only.** The REST gate always uses the
+  password-in-request / `403` flow and does not force a logout, even when
+  `CA_TERMINATE_SESSION` is set.
+- **Coverage is unit-level** (action detection). There are no end-to-end
+  WordPress integration tests of the live `gate()` / `gate_rest()` save paths yet.
+
+**Today** the wedge gates two enumerated user-management surfaces: the form and the
+REST route. Its **goal** — "gate the action across every enumerated user-management
+surface" — is not yet fully met: the Users-list bulk action is the remaining surface,
+gated once [#3](https://github.com/dknauss/consequential-actions/issues/3) lands.
+Arbitrary programmatic `set_role()` from custom code, and non-interactive surfaces
+(WP-CLI, cron), are explicitly WP Sudo's domain — not gaps this prototype intends to
+close.
 
 ## The idea, in two layers
 
@@ -69,8 +108,10 @@ account password the attacker doesn't have. WP Mail Logging is bundled so you ca
 watch a "Lost your password?" reset go to the *real* owner, because the email
 could not be silently hijacked.
 
-The gate closes the **account-takeover** class; it does not make a hijacked *admin*
-omnipotent (that admin could still install a plugin — out of scope for this MVP).
+On the surfaces in the [Scope and guarantees](#scope-and-guarantees) table, the gate
+blocks the **account-takeover** class; it does not make a hijacked *admin* omnipotent
+(that admin could still install a plugin — out of scope for this MVP), and it does not
+yet cover bulk role changes ([issue #3](https://github.com/dknauss/consequential-actions/issues/3)).
 
 [**Open in Playground**](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/main/demo/blueprint.json) &nbsp;·&nbsp; [Stable fallback (pinned `v0.2.1`)](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/v0.2.1/demo/blueprint-pinned.json)
 
@@ -90,8 +131,12 @@ argues core should not have to standardize all at once — and exactly what a fu
 implementation (WP Sudo) takes on.
 
 It **does** now cover the REST users routes (`/wp/v2/users`), for both cookie- and
-Application-Password-authenticated writes, so the demonstration is "gate the
-action, every surface" rather than "gate the form." What it does not add is
+Application-Password-authenticated writes, so the gate spans the admin form **and**
+the REST route for these actions — not just one screen. It does not reach every
+path to the same *effect*: the Users-list **bulk** role change is a **planned** gap
+([#3](https://github.com/dknauss/consequential-actions/issues/3)), while arbitrary
+programmatic `set_role()` from custom code is **deliberately out of scope** (WP
+Sudo's domain). See [Scope and guarantees](#scope-and-guarantees). What it also does not add is
 per-surface *policy* (allow/block/deny tuning), stash-and-replay, or an
 interactive challenge for non-browser callers — a REST caller proves intent by
 resending with `ca_confirm_password`, or by confirming once in wp-admin to open
@@ -122,7 +167,8 @@ Core hooks, no new machinery:
   (`tests/TriggeredActionsTest.php`, `tests/RestTriggeredActionsTest.php`). Run with
   `composer install && composer test`.
 - **REST coverage.** ✅ `rest_pre_dispatch` gates `/wp/v2/users` writes with the same
-  rule, so the demo argues "gate the action, every surface," not "gate the form."
+  rule, so the gate spans the form **and** the REST route — though not yet every path
+  to the same effect (see [Scope and guarantees](#scope-and-guarantees)).
 - **Progressive enhancement.** ✅ A no-build modal collects the password on submit;
   the inline field is the no-JS fallback.
 - **The registry as its own thing.** Layer 1 deserves to be proposed to core
