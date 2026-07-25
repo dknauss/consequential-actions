@@ -20,8 +20,8 @@ today:
 
 | Surface | Operation | Gated? | Reauth mode | Tested |
 |---|---|:---:|---|:---:|
-| Profile / edit-user form | Change own/other password or email, promote one user, create user | ✅ | Window (default) or hardened force-logout | Unit (detection) |
-| REST `/wp/v2/users` (cookie & Application Password) | Same account-takeover changes | ✅ | Window; actor password sent in the request (else `403`) | Unit (detection) |
+| Profile / edit-user / new-user form | Change own/other password or email, promote a user to an admin-equivalent role, create user | ✅ | Window (default) or hardened force-logout | Unit (detection) |
+| REST `/wp/v2/users` (cookie & Application Password) | Same account-takeover changes | ✅ | Shared window; actor password in the request only when the window is closed (else `403`) | Unit (detection) |
 | Users list — **bulk** "Change role → Administrator" | Promote to admin-equivalent | ❌ | — | — |
 | Direct `set_role()` / `add_role()` / custom PHP | Promote / role change | ❌ *(out of scope — WP Sudo's domain)* | — | — |
 | WP-CLI, cron | Any change | ❌ *(out of scope by design)* | — | — |
@@ -42,12 +42,13 @@ today:
 - **Coverage is unit-level** (action detection). There are no end-to-end
   WordPress integration tests of the live `gate()` / `gate_rest()` save paths yet.
 
-The claim this wedge makes is "gate the action across every **enumerated
-user-management surface**" — the form, the REST route, and (once
-[#3](https://github.com/dknauss/consequential-actions/issues/3) lands) the
-Users-list bulk action. Arbitrary programmatic `set_role()` from custom code, and
-non-interactive surfaces (WP-CLI, cron), are explicitly WP Sudo's domain — not gaps
-this prototype intends to close.
+**Today** the wedge gates two enumerated user-management surfaces: the form and the
+REST route. Its **goal** — "gate the action across every enumerated user-management
+surface" — is not yet fully met: the Users-list bulk action is the remaining surface,
+gated once [#3](https://github.com/dknauss/consequential-actions/issues/3) lands.
+Arbitrary programmatic `set_role()` from custom code, and non-interactive surfaces
+(WP-CLI, cron), are explicitly WP Sudo's domain — not gaps this prototype intends to
+close.
 
 ## The idea, in two layers
 
@@ -131,9 +132,11 @@ implementation (WP Sudo) takes on.
 
 It **does** now cover the REST users routes (`/wp/v2/users`), for both cookie- and
 Application-Password-authenticated writes, so the gate spans the admin form **and**
-the REST route for these actions — not just one screen. It does not yet reach every
-path to the same *effect* (bulk role changes, direct `set_role()`); see
-[Scope and guarantees](#scope-and-guarantees). What it also does not add is
+the REST route for these actions — not just one screen. It does not reach every
+path to the same *effect*: the Users-list **bulk** role change is a **planned** gap
+([#3](https://github.com/dknauss/consequential-actions/issues/3)), while arbitrary
+programmatic `set_role()` from custom code is **deliberately out of scope** (WP
+Sudo's domain). See [Scope and guarantees](#scope-and-guarantees). What it also does not add is
 per-surface *policy* (allow/block/deny tuning), stash-and-replay, or an
 interactive challenge for non-browser callers — a REST caller proves intent by
 resending with `ca_confirm_password`, or by confirming once in wp-admin to open
