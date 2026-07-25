@@ -219,16 +219,52 @@ final class TriggeredActionsTest extends TestCase {
 			}
 		);
 		Functions\when( 'get_current_user_id' )->justReturn( 5 );
-		// Even if a stale transient exists, a 0 window must short-circuit to false.
-		Functions\when( 'get_transient' )->justReturn( time() );
+		// Even if a stale confirm transient exists (and no forced-relogin one-shot),
+		// a 0 window must short-circuit to false.
+		Functions\when( 'get_transient' )->alias(
+			static function ( $key ) {
+				return 0 === strpos( (string) $key, 'ca_reauthed_' ) ? false : time();
+			}
+		);
 
 		$this->assertFalse( confirmed_recently() );
 	}
 
 	public function test_recently_confirmed_true_within_window() : void {
 		Functions\when( 'get_current_user_id' )->justReturn( 5 );
-		Functions\when( 'get_transient' )->justReturn( time() );
+		// Confirm transient present, no forced-relogin one-shot → true via the window.
+		Functions\when( 'get_transient' )->alias(
+			static function ( $key ) {
+				return 0 === strpos( (string) $key, 'ca_reauthed_' ) ? false : time();
+			}
+		);
 
 		$this->assertTrue( confirmed_recently() );
+	}
+
+	public function test_forced_relogin_one_shot_passes_once_even_with_zero_window() : void {
+		// Hardened mode + window=0: a forced re-login sets a one-shot pass that
+		// confirmed_recently() honors exactly once, then consumes (Codex #6 P2).
+		Functions\when( 'apply_filters' )->alias(
+			static function ( $tag, $value ) {
+				return 'ca_sudo_window' === $tag ? 0 : $value;
+			}
+		);
+		Functions\when( 'get_current_user_id' )->justReturn( 5 );
+		$store = array( 'ca_reauthed_5' => 1 );
+		Functions\when( 'get_transient' )->alias(
+			static function ( $key ) use ( &$store ) {
+				return $store[ $key ] ?? false;
+			}
+		);
+		Functions\when( 'delete_transient' )->alias(
+			static function ( $key ) use ( &$store ) {
+				unset( $store[ $key ] );
+				return true;
+			}
+		);
+
+		$this->assertTrue( confirmed_recently(), 'one-shot honored despite window=0' );
+		$this->assertFalse( confirmed_recently(), 'one-shot consumed after one use' );
 	}
 }
