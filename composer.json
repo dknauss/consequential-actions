@@ -8,13 +8,15 @@
 	},
 	"require-dev": {
 		"brain/monkey": "^2.6",
-		"phpunit/phpunit": "^9.6"
+		"phpunit/phpunit": "^9.6",
+		"yoast/phpunit-polyfills": "^1.1"
 	},
 	"autoload-dev": {
 		"psr-4": { "ConsequentialActions\\Tests\\": "tests/" }
 	},
 	"scripts": {
-		"test": "phpunit"
+		"test": "phpunit",
+		"test:integration": "phpunit -c phpunit-integration.xml.dist"
 	},
 	"config": {
 		"allow-plugins": false,
