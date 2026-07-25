@@ -17,6 +17,9 @@
 		"test": "phpunit"
 	},
 	"config": {
-		"allow-plugins": false
+		"allow-plugins": false,
+		"platform": {
+			"php": "7.4.0"
+		}
 	}
 }
