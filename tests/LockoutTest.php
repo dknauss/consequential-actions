@@ -3,7 +3,7 @@
  * Unit tests for the failed-confirm lockout — the bound that stops the inline
  * confirm field from being used to brute-force the actor's current password.
  *
- * Verifies the pure counter logic (is_locked_out / record_failed_confirm /
+ * Verifies the pure counter logic (is_locked_out / reserve_attempt /
  * clear_failed_confirms) against an in-memory transient store, with no live
  * WordPress. The threat: a stolen cookie or leaked Application Password could
  * otherwise guess the actor's password through unbounded confirm attempts.
@@ -18,7 +18,7 @@ use PHPUnit\Framework\TestCase;
 use function ConsequentialActions\clear_failed_confirms;
 use function ConsequentialActions\is_locked_out;
 use function ConsequentialActions\lockout_seconds;
-use function ConsequentialActions\record_failed_confirm;
+use function ConsequentialActions\reserve_attempt;
 
 final class LockoutTest extends TestCase {
 
@@ -91,6 +91,12 @@ final class LockoutTest extends TestCase {
 				return $this->cache[ "{$group}:{$key}" ] ?? false;
 			}
 		);
+		Functions\when( 'wp_cache_set' )->alias(
+			function ( $key, $value, $group = '' ) {
+				$this->cache[ "{$group}:{$key}" ] = (int) $value;
+				return true;
+			}
+		);
 		Functions\when( 'wp_cache_delete' )->alias(
 			function ( $key, $group = '' ) {
 				unset( $this->cache[ "{$group}:{$key}" ] );
@@ -111,17 +117,17 @@ final class LockoutTest extends TestCase {
 	public function test_locks_out_only_after_reaching_the_cap() : void {
 		// Default cap is 5: the first four failures stay under the line.
 		for ( $i = 1; $i <= 4; $i++ ) {
-			record_failed_confirm( 7 );
+			reserve_attempt( 7 );
 			$this->assertFalse( is_locked_out( 7 ), "should not lock out after {$i} failure(s)" );
 		}
 		// The fifth failure trips the lockout.
-		record_failed_confirm( 7 );
+		reserve_attempt( 7 );
 		$this->assertTrue( is_locked_out( 7 ) );
 	}
 
 	public function test_lockout_is_per_user() : void {
 		for ( $i = 0; $i < 5; $i++ ) {
-			record_failed_confirm( 7 );
+			reserve_attempt( 7 );
 		}
 		$this->assertTrue( is_locked_out( 7 ) );
 		$this->assertFalse( is_locked_out( 8 ), 'a different user must not inherit the lockout' );
@@ -129,7 +135,7 @@ final class LockoutTest extends TestCase {
 
 	public function test_success_clears_the_counter() : void {
 		for ( $i = 0; $i < 5; $i++ ) {
-			record_failed_confirm( 7 );
+			reserve_attempt( 7 );
 		}
 		$this->assertTrue( is_locked_out( 7 ) );
 
@@ -146,9 +152,34 @@ final class LockoutTest extends TestCase {
 		);
 
 		for ( $i = 0; $i < 20; $i++ ) {
-			record_failed_confirm( 7 );
+			reserve_attempt( 7 );
 		}
 		$this->assertFalse( is_locked_out( 7 ) );
+		$this->assertSame( 0, reserve_attempt( 7 ), 'reserve is a no-op returning 0 when disabled' );
+	}
+
+	/**
+	 * reserve_attempt() returns the running count and bumps each call, so the caller
+	 * can reject a reservation past the cap BEFORE hashing — the fix for the
+	 * check-then-count race. (Transient path.) (Codex #4 P1 — reserve-before-check.)
+	 */
+	public function test_reserve_returns_running_count_transient() : void {
+		$this->assertSame( 1, reserve_attempt( 7 ) );
+		$this->assertSame( 2, reserve_attempt( 7 ) );
+		$this->assertSame( 3, reserve_attempt( 7 ) );
+		$this->assertSame( 4, reserve_attempt( 7 ) );
+		$this->assertSame( 5, reserve_attempt( 7 ) );
+		// The 6th reservation exceeds the default cap of 5 — the caller blocks here
+		// without performing a password check.
+		$this->assertSame( 6, reserve_attempt( 7 ) );
+	}
+
+	/** The atomic object-cache path returns the same running count. */
+	public function test_reserve_returns_running_count_object_cache() : void {
+		$this->enable_object_cache();
+		$this->assertSame( 1, reserve_attempt( 7 ) );
+		$this->assertSame( 2, reserve_attempt( 7 ) );
+		$this->assertSame( 3, reserve_attempt( 7 ) );
 	}
 
 	/**
@@ -174,10 +205,10 @@ final class LockoutTest extends TestCase {
 		$this->enable_object_cache();
 
 		for ( $i = 1; $i <= 4; $i++ ) {
-			record_failed_confirm( 7 );
+			reserve_attempt( 7 );
 			$this->assertFalse( is_locked_out( 7 ), "cache path should not lock out after {$i}" );
 		}
-		record_failed_confirm( 7 );
+		reserve_attempt( 7 );
 		$this->assertTrue( is_locked_out( 7 ), 'cache path must lock out at the cap' );
 
 		clear_failed_confirms( 7 );

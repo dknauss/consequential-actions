@@ -322,12 +322,22 @@ function gate_rest( $result, $server, $request ) {
 
 	$password = $request->get_param( CONFIRM_FIELD );
 	if ( is_string( $password ) && '' !== $password ) {
+		// Reserve BEFORE hashing: an over-cap reservation is rejected without a
+		// password check, so a synchronized batch cannot get every guess evaluated.
+		$max = max_attempts();
+		if ( $max > 0 && reserve_attempt( (int) $actor->ID ) > $max ) {
+			return new \WP_Error(
+				'ca_reauth_locked_out',
+				__( 'Too many failed password confirmations. Please wait a few minutes and try again.', 'consequential-actions' ),
+				array( 'status' => 429 )
+			);
+		}
 		if ( wp_check_password( $password, $actor->user_pass, $actor->ID ) ) {
 			clear_failed_confirms( (int) $actor->ID );
 			mark_confirmed( (int) $actor->ID );
 			return $result;
 		}
-		record_failed_confirm( (int) $actor->ID );
+		// Wrong password: the reservation above already counted it.
 	}
 
 	$labels = array_map(
@@ -469,16 +479,24 @@ function gate( $errors, $update, $user ) : void {
 	$password = isset( $_POST[ CONFIRM_FIELD ] ) ? (string) wp_unslash( $_POST[ CONFIRM_FIELD ] ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- nonce checked on the next line.
 	$nonce_ok = isset( $_POST[ NONCE_FIELD ] ) && wp_verify_nonce( sanitize_key( wp_unslash( $_POST[ NONCE_FIELD ] ) ), NONCE_ACTION );
 
-	if ( '' !== $password && $nonce_ok && wp_check_password( $password, $actor->user_pass, $actor->ID ) ) {
-		clear_failed_confirms( (int) $actor->ID );
-		mark_confirmed( (int) $actor->ID );
-		return;
-	}
-
-	// A supplied-but-wrong password (with a valid nonce) is a failed attempt; an
-	// empty field is just the first prompt and must not be penalised.
+	// Only a supplied password (with a valid nonce) is an attempt; an empty field
+	// is just the first prompt and must not be counted. Reserve BEFORE hashing so
+	// the cap bounds the number of password checks, then verify.
 	if ( '' !== $password && $nonce_ok ) {
-		record_failed_confirm( (int) $actor->ID );
+		$max = max_attempts();
+		if ( $max > 0 && reserve_attempt( (int) $actor->ID ) > $max ) {
+			$errors->add(
+				'ca_reauth_locked_out',
+				esc_html__( 'Too many failed password confirmations. Please wait a few minutes and try again.', 'consequential-actions' )
+			);
+			return;
+		}
+		if ( wp_check_password( $password, $actor->user_pass, $actor->ID ) ) {
+			clear_failed_confirms( (int) $actor->ID );
+			mark_confirmed( (int) $actor->ID );
+			return;
+		}
+		// Wrong password: the reservation above already counted it.
 	}
 
 	// Labels come from the filterable registry, so escape each one — a third-party
@@ -718,8 +736,9 @@ function lockout_key( int $user_id ) : string {
 /**
  * Is this user currently locked out from confirming?
  *
- * Reads the same store record_failed_confirm() writes to: the object cache when
- * one is persistent, otherwise a transient.
+ * Reads the same store reserve_attempt() writes to: the object cache when one is
+ * persistent, otherwise a transient. This is the already-locked fast path;
+ * reserve_attempt() is what enforces the bound on a fresh attempt.
  *
  * @param int $user_id
  * @return bool True once the failed-confirm count has reached the cap.
@@ -737,35 +756,58 @@ function is_locked_out( int $user_id ) : bool {
 }
 
 /**
- * Record one failed confirmation, arming the lockout once the cap is reached.
+ * Reserve one confirm attempt and return the running failed-attempt count.
  *
- * Where a persistent object cache backs the site (Redis/Memcached), the counter
- * is incremented atomically (wp_cache_add seeds it, wp_cache_incr bumps it) so
- * concurrent guesses cannot each read the same value and advance it only once —
- * the race that would otherwise let synchronized batches slip far past the bound.
- * Without such a cache it falls back to a transient counter: best-effort (the
- * read-modify-write is not atomic), but every attempt still costs a full password
- * hash and the count converges as writes serialize. The cooldown TTL is seeded
- * from the first failure.
+ * Called BEFORE the password is checked, not after — otherwise many concurrent
+ * guesses all pass is_locked_out() (counter still below the cap) and every one of
+ * them is evaluated before the count rises, so the bound never bites. Reserving
+ * first means each request atomically claims a slot; the caller rejects any slot
+ * past the cap without hashing, and clears the counter on a correct password.
+ *
+ * Where a persistent object cache backs the site (Redis/Memcached), the reserve is
+ * atomic (wp_cache_add seeds, wp_cache_incr bumps), so concurrent guesses get
+ * distinct counts and only max_attempts() of them can pass — the bound holds under
+ * concurrency. incr does not extend the TTL wp_cache_add set, so the cooldown is
+ * refreshed once the lockout triggers, making it run the full window from when it
+ * starts rather than from the first failure. Without such a cache it falls back to
+ * a transient counter: best-effort (the read-modify-write is not atomic), TTL
+ * refreshed each failure; every attempt still costs a full password hash.
+ *
+ * Returns 0 when the lockout is disabled (max_attempts() <= 0), so callers never
+ * block or count in that mode.
  *
  * @param int $user_id
+ * @return int The failed-attempt count after this reservation (0 if disabled).
  */
-function record_failed_confirm( int $user_id ) : void {
-	if ( max_attempts() <= 0 ) {
-		return;
+function reserve_attempt( int $user_id ) : int {
+	$max = max_attempts();
+	if ( $max <= 0 ) {
+		return 0;
 	}
 	$key = lockout_key( $user_id );
 	$ttl = lockout_seconds();
 
 	if ( wp_using_ext_object_cache() ) {
-		if ( ! wp_cache_add( $key, 1, 'ca_lockout', $ttl ) ) {
-			wp_cache_incr( $key, 1, 'ca_lockout' );
+		if ( wp_cache_add( $key, 1, 'ca_lockout', $ttl ) ) {
+			$count = 1;
+		} else {
+			$count = (int) wp_cache_incr( $key, 1, 'ca_lockout' );
+			if ( $count < 1 ) {
+				// Key expired between the add and the incr — reseed it.
+				wp_cache_set( $key, 1, 'ca_lockout', $ttl );
+				$count = 1;
+			}
 		}
-		return;
+		if ( $count >= $max ) {
+			// Start the cooldown when the lockout actually triggers.
+			wp_cache_set( $key, $count, 'ca_lockout', $ttl );
+		}
+		return $count;
 	}
 
-	$fails = (int) get_transient( $key ) + 1;
-	set_transient( $key, $fails, $ttl );
+	$count = (int) get_transient( $key ) + 1;
+	set_transient( $key, $count, $ttl );
+	return $count;
 }
 
 /**
