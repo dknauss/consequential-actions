@@ -22,33 +22,31 @@ today:
 |---|---|:---:|---|:---:|
 | Profile / edit-user / new-user form | Change own/other password or email, promote a user to an admin-equivalent role, create user | ✅ | Window (default) or hardened force-logout | Unit (detection) |
 | REST `/wp/v2/users` (cookie & Application Password) | Same account-takeover changes | ✅ | Shared window; actor password in the request only when the window is closed (else `403`) | Unit (detection) |
-| Users list — **bulk** "Change role → Administrator" | Promote to admin-equivalent | ❌ | — | — |
+| Users list — **bulk** "Change role → Administrator" | Promote to admin-equivalent | ✅ | Inline interstitial (password re-POST) or hardened force-logout | Unit + live E2E |
 | Direct `set_role()` / `add_role()` / custom PHP | Promote / role change | ❌ *(out of scope — WP Sudo's domain)* | — | — |
 | WP-CLI, cron | Any change | ❌ *(out of scope by design)* | — | — |
 
-**Known gaps (not yet gated):**
+**Known gaps / limitations:**
 
-- **Bulk role promotion on the Users list is ungated** — it reaches `set_role()`
-  directly and never fires the `user_profile_update_errors` hook the form gate
-  relies on. This is a real bypass of the enumerated-surface goal, tracked in
-  [issue #3](https://github.com/dknauss/consequential-actions/issues/3); the planned
-  fix intercepts the bulk `promote` action on the Users screen *before* it runs and
-  routes it through the same shared confirm window. Gating *arbitrary* programmatic
-  `set_role()` from custom code is a different, effect-level problem left to WP Sudo
-  (the `set_role()` row above).
-- **Hardened force-logout is classic-admin only.** The REST gate always uses the
-  password-in-request / `403` flow and does not force a logout, even when
-  `CA_TERMINATE_SESSION` is set.
-- **Coverage is unit-level** (action detection). There are no end-to-end
-  WordPress integration tests of the live `gate()` / `gate_rest()` save paths yet.
+- **Bulk role promotion is now gated** ([#3](https://github.com/dknauss/consequential-actions/issues/3),
+  landed) — the Users-list bulk "Change role" is intercepted on `load-users.php`
+  before core runs `set_role()`, matching core's own promote detection (`changeit`
+  or `action`/`action2` = `promote`). Gating *arbitrary* programmatic `set_role()`
+  from custom code remains a different, effect-level problem left to WP Sudo (the
+  `set_role()` row above).
+- **REST hardened mode.** The REST gate always uses the password-in-request / `403`
+  flow and does not force a logout, even when `CA_TERMINATE_SESSION` is set.
+- **Coverage is unit-level** (action detection). The pure detectors are unit-tested;
+  the bulk gate was additionally verified end-to-end by hand on WordPress 7.0.2 in
+  Playground (block → interstitial → correct password → promotion; wrong password
+  re-challenges; a non-escalating change and a crafted `action=promote` both behave
+  correctly). There are still no *automated* end-to-end tests of the live `gate()` /
+  `gate_rest()` / `gate_bulk_promote()` save paths.
 
-**Today** the wedge gates two enumerated user-management surfaces: the form and the
-REST route. Its **goal** — "gate the action across every enumerated user-management
-surface" — is not yet fully met: the Users-list bulk action is the remaining surface,
-gated once [#3](https://github.com/dknauss/consequential-actions/issues/3) lands.
-Arbitrary programmatic `set_role()` from custom code, and non-interactive surfaces
-(WP-CLI, cron), are explicitly WP Sudo's domain — not gaps this prototype intends to
-close.
+The wedge now gates the action across **three enumerated user-management surfaces**:
+the form, the REST route, and the Users-list bulk action. Arbitrary programmatic
+`set_role()` from custom code, and non-interactive surfaces (WP-CLI, cron), are
+explicitly WP Sudo's domain — not gaps this prototype intends to close.
 
 ## The idea, in two layers
 
