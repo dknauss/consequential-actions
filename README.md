@@ -23,25 +23,31 @@ today:
 | Profile / edit-user form | Change own/other password or email, promote one user, create user | ✅ | Window (default) or hardened force-logout | Unit (detection) |
 | REST `/wp/v2/users` (cookie & Application Password) | Same account-takeover changes | ✅ | Window; actor password sent in the request (else `403`) | Unit (detection) |
 | Users list — **bulk** "Change role → Administrator" | Promote to admin-equivalent | ❌ | — | — |
-| Direct `set_role()` / `add_role()` / custom PHP | Promote / role change | ❌ | — | — |
+| Direct `set_role()` / `add_role()` / custom PHP | Promote / role change | ❌ *(out of scope — WP Sudo's domain)* | — | — |
 | WP-CLI, cron | Any change | ❌ *(out of scope by design)* | — | — |
 
 **Known gaps (not yet gated):**
 
 - **Bulk role promotion on the Users list is ungated** — it reaches `set_role()`
   directly and never fires the `user_profile_update_errors` hook the form gate
-  relies on. This is a real bypass of the "every surface" goal, tracked in
-  [issue #3](https://github.com/dknauss/consequential-actions/issues/3). Gating the
-  underlying escalation *effect* (so bulk, direct `set_role()`, and custom code are
-  all covered) is the intended fix and is what WP Sudo already does.
+  relies on. This is a real bypass of the enumerated-surface goal, tracked in
+  [issue #3](https://github.com/dknauss/consequential-actions/issues/3); the planned
+  fix intercepts the bulk `promote` action on the Users screen *before* it runs and
+  routes it through the same shared confirm window. Gating *arbitrary* programmatic
+  `set_role()` from custom code is a different, effect-level problem left to WP Sudo
+  (the `set_role()` row above).
 - **Hardened force-logout is classic-admin only.** The REST gate always uses the
   password-in-request / `403` flow and does not force a logout, even when
   `CA_TERMINATE_SESSION` is set.
 - **Coverage is unit-level** (action detection). There are no end-to-end
   WordPress integration tests of the live `gate()` / `gate_rest()` save paths yet.
 
-"Gate the action, every surface" is the design *goal* this wedge argues for; the
-table above is where the implementation actually delivers it today.
+The claim this wedge makes is "gate the action across every **enumerated
+user-management surface**" — the form, the REST route, and (once
+[#3](https://github.com/dknauss/consequential-actions/issues/3) lands) the
+Users-list bulk action. Arbitrary programmatic `set_role()` from custom code, and
+non-interactive surfaces (WP-CLI, cron), are explicitly WP Sudo's domain — not gaps
+this prototype intends to close.
 
 ## The idea, in two layers
 
