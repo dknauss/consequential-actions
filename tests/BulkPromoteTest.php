@@ -164,4 +164,12 @@ final class BulkPromoteTest extends TestCase {
 	public function test_no_action_is_not_promote() : void {
 		$this->assertFalse( is_bulk_promote_request( array() ) );
 	}
+
+	/**
+	 * Core uses a LOOSE `-1 != action` sentinel, so action=-01 counts as "no
+	 * action" and it falls through to action2=promote. The detector must match, or
+	 * a crafted request bypasses the gate while core still promotes (Codex #6). */
+	public function test_numeric_minus_one_variant_falls_through_to_action2() : void {
+		$this->assertTrue( is_bulk_promote_request( array( 'action' => '-01', 'action2' => 'promote' ) ) );
+	}
 }

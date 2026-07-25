@@ -528,11 +528,18 @@ function is_bulk_promote_request( array $req ) : bool {
 	if ( ! empty( $req['filter_action'] ) ) {
 		return false;
 	}
-	// The parent returns the first of action/action2 that is set and not "-1".
+	// The parent returns the first of action/action2 that is set and not the "-1"
+	// sentinel, using a LOOSE `-1 != $value` check — so numeric variants like "-01"
+	// also count as "no action". Mirror that exactly, or a crafted action=-01 with
+	// action2=promote would slip past here while core still runs the promote branch.
 	foreach ( array( 'action', 'action2' ) as $k ) {
-		if ( isset( $req[ $k ] ) && '-1' !== (string) $req[ $k ] ) {
-			return 'promote' === $req[ $k ];
+		if ( ! isset( $req[ $k ] ) || is_array( $req[ $k ] ) ) {
+			continue;
 		}
+		if ( -1 == $req[ $k ] ) { // phpcs:ignore WordPress.PHP.StrictComparisons.LooseComparison -- intentionally mirrors core's loose -1 sentinel.
+			continue;
+		}
+		return 'promote' === $req[ $k ];
 	}
 	return false;
 }
@@ -813,11 +820,15 @@ function on_login( $user_login, $user = null ) : void {
 	if ( get_transient( pending_key( (int) $user->ID ) ) ) {
 		delete_transient( pending_key( (int) $user->ID ) );
 		mark_confirmed( (int) $user->ID );
-		// A forced re-login IS the reauthentication. Grant a one-time pass so the
-		// retried action succeeds even when the window is disabled (ca_sudo_window =
-		// 0), where mark_confirmed() stores nothing — otherwise hardened mode would
-		// log the user straight back out in a loop.
-		set_transient( reauthed_key( (int) $user->ID ), 1, 15 * MINUTE_IN_SECONDS );
+		// A forced re-login IS the reauthentication. When the window is disabled
+		// (ca_sudo_window = 0), mark_confirmed() stores nothing, so grant a one-time
+		// pass to authorize the retry — otherwise hardened mode loops the user
+		// straight back out. Only in zero-window mode: when a window IS configured,
+		// mark_confirmed() already covers the retry, and a longer-lived one-shot
+		// would let reauth outlive ca_sudo_window.
+		if ( window_seconds() <= 0 ) {
+			set_transient( reauthed_key( (int) $user->ID ), 1, 15 * MINUTE_IN_SECONDS );
+		}
 	}
 }
 
