@@ -308,13 +308,26 @@ function gate_rest( $result, $server, $request ) {
 	}
 
 	// Inline confirm: the actor's OWN current password, sent with the request.
+	$actor = wp_get_current_user();
+
+	// Bounded guessing: a stolen cookie or leaked Application Password must not be
+	// able to brute-force the actor's password through this field.
+	if ( is_locked_out( (int) $actor->ID ) ) {
+		return new \WP_Error(
+			'ca_reauth_locked_out',
+			__( 'Too many failed password confirmations. Please wait a few minutes and try again.', 'consequential-actions' ),
+			array( 'status' => 429 )
+		);
+	}
+
 	$password = $request->get_param( CONFIRM_FIELD );
 	if ( is_string( $password ) && '' !== $password ) {
-		$actor = wp_get_current_user();
 		if ( wp_check_password( $password, $actor->user_pass, $actor->ID ) ) {
+			clear_failed_confirms( (int) $actor->ID );
 			mark_confirmed( (int) $actor->ID );
 			return $result;
 		}
+		record_failed_confirm( (int) $actor->ID );
 	}
 
 	$labels = array_map(
@@ -442,12 +455,30 @@ function gate( $errors, $update, $user ) : void {
 	}
 
 	// Default mode: verify the actor's password inline, on this same form.
+
+	// Bounded guessing: cap failed confirmations so this field cannot be used to
+	// brute-force the actor's current password (see is_locked_out()).
+	if ( is_locked_out( (int) $actor->ID ) ) {
+		$errors->add(
+			'ca_reauth_locked_out',
+			esc_html__( 'Too many failed password confirmations. Please wait a few minutes and try again.', 'consequential-actions' )
+		);
+		return;
+	}
+
 	$password = isset( $_POST[ CONFIRM_FIELD ] ) ? (string) wp_unslash( $_POST[ CONFIRM_FIELD ] ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- nonce checked on the next line.
 	$nonce_ok = isset( $_POST[ NONCE_FIELD ] ) && wp_verify_nonce( sanitize_key( wp_unslash( $_POST[ NONCE_FIELD ] ) ), NONCE_ACTION );
 
 	if ( '' !== $password && $nonce_ok && wp_check_password( $password, $actor->user_pass, $actor->ID ) ) {
+		clear_failed_confirms( (int) $actor->ID );
 		mark_confirmed( (int) $actor->ID );
 		return;
+	}
+
+	// A supplied-but-wrong password (with a valid nonce) is a failed attempt; an
+	// empty field is just the first prompt and must not be penalised.
+	if ( '' !== $password && $nonce_ok ) {
+		record_failed_confirm( (int) $actor->ID );
 	}
 
 	// Labels come from the filterable registry, so escape each one — a third-party
@@ -633,6 +664,85 @@ function mark_confirmed( int $user_id ) : void {
 	if ( $window > 0 ) {
 		set_transient( confirm_key( $user_id ), time(), $window );
 	}
+}
+
+/**
+ * Failed-confirm attempts allowed before a cooldown blocks further tries.
+ *
+ * The inline confirm checks the actor's CURRENT password, so without a bound a
+ * stolen cookie or a leaked Application Password could brute-force it directly
+ * through this field — unseen by the wp-login lockout tools, which never see it.
+ * This is the one hardening WP Sudo has (5 attempts → 5-minute lockout) that a
+ * proof-of-intent primitive of any size still needs. Return 0 to disable.
+ *
+ * @return int Max failed attempts before lockout. 0 = disabled.
+ */
+function max_attempts() : int {
+	/**
+	 * Filter the failed-confirm attempt cap.
+	 *
+	 * @param int $max Default 5. Return 0 to disable the lockout.
+	 */
+	return (int) apply_filters( 'ca_max_attempts', 5 );
+}
+
+/**
+ * @return int Seconds a lockout lasts once max_attempts() is exceeded.
+ */
+function lockout_seconds() : int {
+	/**
+	 * Filter the lockout cooldown length in seconds.
+	 *
+	 * @param int $seconds Default 5 minutes.
+	 */
+	return (int) apply_filters( 'ca_lockout_seconds', 5 * MINUTE_IN_SECONDS );
+}
+
+/**
+ * @param int $user_id
+ * @return string Transient key for a user's failed-confirm counter.
+ */
+function lockout_key( int $user_id ) : string {
+	return 'ca_confirm_fails_' . $user_id;
+}
+
+/**
+ * Is this user currently locked out from confirming?
+ *
+ * @param int $user_id
+ * @return bool True once the failed-confirm count has reached the cap.
+ */
+function is_locked_out( int $user_id ) : bool {
+	$max = max_attempts();
+	if ( $max <= 0 ) {
+		return false;
+	}
+	return (int) get_transient( lockout_key( $user_id ) ) >= $max;
+}
+
+/**
+ * Record one failed confirmation, arming the lockout once the cap is reached.
+ *
+ * The counter's TTL is refreshed on each failure, so sustained guessing keeps
+ * the cooldown alive rather than letting it lapse mid-attack.
+ *
+ * @param int $user_id
+ */
+function record_failed_confirm( int $user_id ) : void {
+	if ( max_attempts() <= 0 ) {
+		return;
+	}
+	$fails = (int) get_transient( lockout_key( $user_id ) ) + 1;
+	set_transient( lockout_key( $user_id ), $fails, lockout_seconds() );
+}
+
+/**
+ * Clear a user's failed-confirm counter after a successful confirm.
+ *
+ * @param int $user_id
+ */
+function clear_failed_confirms( int $user_id ) : void {
+	delete_transient( lockout_key( $user_id ) );
 }
 
 add_action( 'user_profile_update_errors', __NAMESPACE__ . '\\gate', 10, 3 );
