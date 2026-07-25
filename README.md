@@ -20,8 +20,8 @@ today:
 
 | Surface | Operation | Gated? | Reauth mode | Tested |
 |---|---|:---:|---|:---:|
-| Profile / edit-user / new-user form | Change own/other password or email, promote a user to an admin-equivalent role, create user | ✅ | Window (default) or hardened force-logout | Unit (detection) |
-| REST `/wp/v2/users` (cookie & Application Password) | Same account-takeover changes | ✅ | Shared window; actor password in the request only when the window is closed (else `403`) | Unit (detection) |
+| Profile / edit-user / new-user form | Change own/other password or email, promote a user to an admin-equivalent role, create user | ✅ | Window (default) or hardened force-logout | Unit + live E2E |
+| REST `/wp/v2/users` (cookie & Application Password) | Same account-takeover changes | ✅ | Shared window; actor password in the request only when the window is closed (else `403`) | Unit + live E2E |
 | Users list — **bulk** "Change role → Administrator" | Promote to admin-equivalent | ✅ | Inline interstitial (password re-POST) or hardened force-logout | Unit + live E2E |
 | Direct `set_role()` / `add_role()` / custom PHP | Promote / role change | ❌ *(out of scope — WP Sudo's domain)* | — | — |
 | WP-CLI, cron | Any change | ❌ *(out of scope by design)* | — | — |
@@ -36,12 +36,15 @@ today:
   `set_role()` row above).
 - **REST hardened mode.** The REST gate always uses the password-in-request / `403`
   flow and does not force a logout, even when `CA_TERMINATE_SESSION` is set.
-- **Coverage is unit-level** (action detection). The pure detectors are unit-tested;
-  the bulk gate was additionally verified end-to-end by hand on WordPress 7.0.2 in
-  Playground (block → interstitial → correct password → promotion; wrong password
-  re-challenges; a non-escalating change and a crafted `action=promote` both behave
-  correctly). There are still no *automated* end-to-end tests of the live `gate()` /
-  `gate_rest()` / `gate_bulk_promote()` save paths.
+- **Coverage is unit-level** (action detection). The pure detectors are unit-tested,
+  and all three gates were additionally verified end-to-end by hand on WordPress
+  7.0.2 in Playground: the **form** gate (`gate()`) blocks create-user without the
+  confirm and creates it with; the **REST** gate (`gate_rest()`) returns `403
+  ca_reauth_required` on an email change and succeeds once `ca_confirm_password` is
+  supplied; the **bulk** gate (`gate_bulk_promote()`) blocks a bulk promote (block →
+  interstitial → correct password → promotion; wrong password re-challenges; a
+  non-escalating change and a crafted `action=promote` both behave correctly). There
+  are still no *automated* end-to-end tests of these save paths.
 
 The wedge now gates the action across **three enumerated user-management surfaces**:
 the form, the REST route, and the Users-list bulk action. Arbitrary programmatic
