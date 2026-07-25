@@ -508,6 +508,36 @@ function gate( $errors, $update, $user ) : void {
 }
 
 /**
+ * Does this request resolve to the Users-list "promote" bulk action, the way core
+ * does?
+ *
+ * Core's WP_Users_List_Table::current_action() returns 'promote' when the "Change
+ * role" button (`changeit`) is set, and otherwise delegates to WP_List_Table, which
+ * returns the `action`/`action2` bulk selection. So a crafted `action=promote` with
+ * no `changeit` reaches the same set_role() branch and must be gated too. Pure
+ * (request array in) so it is unit-testable.
+ *
+ * @param array<string,mixed> $req Request params (typically $_REQUEST).
+ * @return bool
+ */
+function is_bulk_promote_request( array $req ) : bool {
+	if ( isset( $req['changeit'] ) ) {
+		return true;
+	}
+	// Mirror WP_List_Table::current_action(): a filter submit is not a bulk action.
+	if ( ! empty( $req['filter_action'] ) ) {
+		return false;
+	}
+	// The parent returns the first of action/action2 that is set and not "-1".
+	foreach ( array( 'action', 'action2' ) as $k ) {
+		if ( isset( $req[ $k ] ) && '-1' !== (string) $req[ $k ] ) {
+			return 'promote' === $req[ $k ];
+		}
+	}
+	return false;
+}
+
+/**
  * Layer 2 for the Users-list bulk action — gate "Change role → …" before it runs.
  *
  * The single-user form (gate()) and REST (gate_rest()) paths are covered, but the
@@ -536,10 +566,11 @@ function gate_bulk_promote() : void {
 		return;
 	}
 
-	// Core's WP_Users_List_Table::current_action() returns 'promote' whenever the
-	// "Change role to…" button (`changeit`) is set — NOT via action=promote. Mirror
-	// that exactly, or the gate misses the real path.
-	if ( ! isset( $_REQUEST['changeit'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- nonce verified below before any effect.
+	// Detect the "promote" bulk action exactly as core's current_action() does — the
+	// `changeit` button OR a bulk action=promote / action2=promote. Detecting only
+	// `changeit` would miss a crafted action=promote request, which core still runs
+	// through the same set_role() branch.
+	if ( ! is_bulk_promote_request( $_REQUEST ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- nonce verified below before any effect.
 		return;
 	}
 
@@ -782,6 +813,11 @@ function on_login( $user_login, $user = null ) : void {
 	if ( get_transient( pending_key( (int) $user->ID ) ) ) {
 		delete_transient( pending_key( (int) $user->ID ) );
 		mark_confirmed( (int) $user->ID );
+		// A forced re-login IS the reauthentication. Grant a one-time pass so the
+		// retried action succeeds even when the window is disabled (ca_sudo_window =
+		// 0), where mark_confirmed() stores nothing — otherwise hardened mode would
+		// log the user straight back out in a loop.
+		set_transient( reauthed_key( (int) $user->ID ), 1, 15 * MINUTE_IN_SECONDS );
 	}
 }
 
@@ -802,13 +838,30 @@ function pending_key( int $user_id ) : string {
 }
 
 /**
- * @return bool Whether the current user confirmed within the sudo window.
+ * @param int $user_id
+ * @return string Transient key for the one-time pass a forced re-login grants,
+ *                honored even when the sudo window is disabled (ca_sudo_window = 0).
+ */
+function reauthed_key( int $user_id ) : string {
+	return 'ca_reauthed_' . $user_id;
+}
+
+/**
+ * @return bool Whether the current user has proven recent intent — an open sudo
+ *              window, or a one-time pass from a forced re-login (hardened mode).
  */
 function confirmed_recently() : bool {
+	$uid = get_current_user_id();
+	// A forced re-login grants a one-time pass, honored even when the window is
+	// disabled — consume it here so it authorizes exactly one retry.
+	if ( get_transient( reauthed_key( $uid ) ) ) {
+		delete_transient( reauthed_key( $uid ) );
+		return true;
+	}
 	if ( window_seconds() <= 0 ) {
 		return false;
 	}
-	return (bool) get_transient( confirm_key( get_current_user_id() ) );
+	return (bool) get_transient( confirm_key( $uid ) );
 }
 
 /**

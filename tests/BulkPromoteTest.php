@@ -15,6 +15,7 @@ use Brain\Monkey\Functions;
 use PHPUnit\Framework\TestCase;
 
 use function ConsequentialActions\escalating_bulk_targets;
+use function ConsequentialActions\is_bulk_promote_request;
 
 final class BulkPromoteTest extends TestCase {
 
@@ -134,5 +135,33 @@ final class BulkPromoteTest extends TestCase {
 			)
 		);
 		$this->assertSame( array( 5, 7 ), $targets );
+	}
+
+	// --- is_bulk_promote_request(): mirror core's promote detection ---------------
+
+	public function test_promote_detected_via_changeit() : void {
+		$this->assertTrue( is_bulk_promote_request( array( 'changeit' => 'Change' ) ) );
+	}
+
+	/** A crafted action=promote with no `changeit` must still be detected (Codex #6). */
+	public function test_promote_detected_via_action() : void {
+		$this->assertTrue( is_bulk_promote_request( array( 'action' => 'promote' ) ) );
+	}
+
+	public function test_promote_detected_via_action2() : void {
+		$this->assertTrue( is_bulk_promote_request( array( 'action' => '-1', 'action2' => 'promote' ) ) );
+	}
+
+	public function test_other_bulk_action_is_not_promote() : void {
+		$this->assertFalse( is_bulk_promote_request( array( 'action' => 'delete' ) ) );
+	}
+
+	public function test_filter_submit_is_not_a_bulk_action() : void {
+		// Mirrors core: a filter submit short-circuits current_action() to false.
+		$this->assertFalse( is_bulk_promote_request( array( 'filter_action' => 'Filter', 'action' => 'promote' ) ) );
+	}
+
+	public function test_no_action_is_not_promote() : void {
+		$this->assertFalse( is_bulk_promote_request( array() ) );
 	}
 }
