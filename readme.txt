@@ -3,7 +3,7 @@ Contributors: dknauss
 Tags: security, reauthentication, sudo, two-factor
 Requires at least: 6.4
 Requires PHP: 7.4
-Stable tag: 0.2.1
+Stable tag: 0.2.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -75,6 +75,20 @@ a named registry plus a thin gate, offered as a wedge for a core primitive rathe
 than as another standalone product.
 
 == Changelog ==
+
+= 0.2.2 =
+* Security: bound the failed-confirm attempts. The inline confirm field checks the
+  actor's *current* password on every try, and until now nothing throttled it — so a
+  stolen cookie or a leaked Application Password could brute-force that password
+  directly through the field, unseen by the wp-login lockout tools (which never see
+  this separate check). A per-user counter now locks confirming after 5 failed
+  attempts (filter `ca_max_attempts`) for 5 minutes (filter `ca_lockout_seconds`);
+  set the cap to 0 to disable. A wrong password counts on both the admin form and the
+  REST route; a correct one clears the counter. REST returns 429 ca_reauth_locked_out.
+  This is the one hardening WP Sudo has that a proof-of-intent primitive of any size
+  still needs — it does not pull in the heavy framework (stash/replay, 2FA, multisite
+  sessions) the wedge deliberately leaves to WP Sudo. Adds unit coverage for the
+  lockout counter.
 
 = 0.2.1 =
 * Registry: each catalog entry now carries the full metadata shape a core Actions

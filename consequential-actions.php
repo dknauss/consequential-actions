@@ -3,7 +3,7 @@
  * Plugin Name:       Consequential Actions (Reauth MVP)
  * Plugin URI:        https://github.com/dknauss/consequential-actions
  * Description:       Requires the acting user to re-confirm their current password before account-takeover actions (password/email change, user creation, promotion to administrator) commit. A minimal demonstrator for a possible WordPress core "consequential actions" registry + proof-of-intent primitive. See Trac #20140.
- * Version:           0.2.1
+ * Version:           0.2.2
  * Requires at least: 6.4
  * Requires PHP:      7.4
  * Author:            Dan Knauss
