@@ -17,6 +17,7 @@ use PHPUnit\Framework\TestCase;
 
 use function ConsequentialActions\clear_failed_confirms;
 use function ConsequentialActions\is_locked_out;
+use function ConsequentialActions\lockout_seconds;
 use function ConsequentialActions\record_failed_confirm;
 
 final class LockoutTest extends TestCase {
@@ -24,15 +25,21 @@ final class LockoutTest extends TestCase {
 	/** @var array<string,mixed> In-memory transient store. */
 	private array $store = array();
 
+	/** @var array<string,int> In-memory object-cache store (keyed "group:key"). */
+	private array $cache = array();
+
 	protected function setUp() : void {
 		parent::setUp();
 		Monkey\setUp();
 
 		$this->store = array();
+		$this->cache = array();
 
 		Functions\when( '__' )->returnArg( 1 );
 		// Default: filters return their provided default unchanged (cap = 5).
 		Functions\when( 'apply_filters' )->returnArg( 2 );
+		// Default: no persistent object cache — exercise the transient path.
+		Functions\when( 'wp_using_ext_object_cache' )->justReturn( false );
 
 		Functions\when( 'get_transient' )->alias(
 			function ( $key ) {
@@ -48,6 +55,45 @@ final class LockoutTest extends TestCase {
 		Functions\when( 'delete_transient' )->alias(
 			function ( $key ) {
 				unset( $this->store[ $key ] );
+				return true;
+			}
+		);
+	}
+
+	/**
+	 * Switch the code under test onto the atomic object-cache path, backed by an
+	 * in-memory cache whose wp_cache_add/incr behave like the real atomics.
+	 */
+	private function enable_object_cache() : void {
+		Functions\when( 'wp_using_ext_object_cache' )->justReturn( true );
+		Functions\when( 'wp_cache_add' )->alias(
+			function ( $key, $value, $group = '' ) {
+				$id = "{$group}:{$key}";
+				if ( array_key_exists( $id, $this->cache ) ) {
+					return false; // add-if-absent, like the real atomic add.
+				}
+				$this->cache[ $id ] = (int) $value;
+				return true;
+			}
+		);
+		Functions\when( 'wp_cache_incr' )->alias(
+			function ( $key, $offset = 1, $group = '' ) {
+				$id = "{$group}:{$key}";
+				if ( ! array_key_exists( $id, $this->cache ) ) {
+					return false;
+				}
+				$this->cache[ $id ] += (int) $offset;
+				return $this->cache[ $id ];
+			}
+		);
+		Functions\when( 'wp_cache_get' )->alias(
+			function ( $key, $group = '' ) {
+				return $this->cache[ "{$group}:{$key}" ] ?? false;
+			}
+		);
+		Functions\when( 'wp_cache_delete' )->alias(
+			function ( $key, $group = '' ) {
+				unset( $this->cache[ "{$group}:{$key}" ] );
 				return true;
 			}
 		);
@@ -103,5 +149,38 @@ final class LockoutTest extends TestCase {
 			record_failed_confirm( 7 );
 		}
 		$this->assertFalse( is_locked_out( 7 ) );
+	}
+
+	/**
+	 * A zero (or negative) ca_lockout_seconds must NOT reach the transient as a
+	 * 0 TTL — WordPress reads that as "never expire", which would make the
+	 * lockout permanent. It falls back to the default instead. (Codex #4 P2.)
+	 */
+	public function test_nonpositive_cooldown_falls_back_to_default() : void {
+		Functions\when( 'apply_filters' )->alias(
+			function ( $hook, $default ) {
+				return 'ca_lockout_seconds' === $hook ? 0 : $default;
+			}
+		);
+		$this->assertSame( 5 * 60, lockout_seconds(), 'zero cooldown must normalise to the default' );
+	}
+
+	/**
+	 * The atomic object-cache path enforces the same cap. Exercising it proves
+	 * record/is_locked_out/clear all agree on the cache store, not just the
+	 * transient store. (Codex #4 P1 — atomic increment path.)
+	 */
+	public function test_object_cache_path_locks_out_after_cap_and_clears() : void {
+		$this->enable_object_cache();
+
+		for ( $i = 1; $i <= 4; $i++ ) {
+			record_failed_confirm( 7 );
+			$this->assertFalse( is_locked_out( 7 ), "cache path should not lock out after {$i}" );
+		}
+		record_failed_confirm( 7 );
+		$this->assertTrue( is_locked_out( 7 ), 'cache path must lock out at the cap' );
+
+		clear_failed_confirms( 7 );
+		$this->assertFalse( is_locked_out( 7 ), 'clear must reset the cache counter' );
 	}
 }

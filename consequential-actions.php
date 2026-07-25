@@ -687,20 +687,29 @@ function max_attempts() : int {
 }
 
 /**
- * @return int Seconds a lockout lasts once max_attempts() is exceeded.
+ * Seconds a lockout lasts once max_attempts() is exceeded.
+ *
+ * A non-positive filtered value is rejected and falls back to the default: a
+ * transient TTL of 0 means "never expire" in WordPress, which would turn a
+ * lockout permanent (a correct password could never reach clear_failed_confirms()
+ * once the cap is hit). Disable the lockout with `ca_max_attempts` => 0, never by
+ * zeroing the cooldown.
+ *
+ * @return int Seconds, always >= 1.
  */
 function lockout_seconds() : int {
 	/**
 	 * Filter the lockout cooldown length in seconds.
 	 *
-	 * @param int $seconds Default 5 minutes.
+	 * @param int $seconds Default 5 minutes. Non-positive values are ignored.
 	 */
-	return (int) apply_filters( 'ca_lockout_seconds', 5 * MINUTE_IN_SECONDS );
+	$seconds = (int) apply_filters( 'ca_lockout_seconds', 5 * MINUTE_IN_SECONDS );
+	return $seconds > 0 ? $seconds : 5 * MINUTE_IN_SECONDS;
 }
 
 /**
  * @param int $user_id
- * @return string Transient key for a user's failed-confirm counter.
+ * @return string Cache/transient key for a user's failed-confirm counter.
  */
 function lockout_key( int $user_id ) : string {
 	return 'ca_confirm_fails_' . $user_id;
@@ -708,6 +717,9 @@ function lockout_key( int $user_id ) : string {
 
 /**
  * Is this user currently locked out from confirming?
+ *
+ * Reads the same store record_failed_confirm() writes to: the object cache when
+ * one is persistent, otherwise a transient.
  *
  * @param int $user_id
  * @return bool True once the failed-confirm count has reached the cap.
@@ -717,14 +729,24 @@ function is_locked_out( int $user_id ) : bool {
 	if ( $max <= 0 ) {
 		return false;
 	}
-	return (int) get_transient( lockout_key( $user_id ) ) >= $max;
+	$key   = lockout_key( $user_id );
+	$count = wp_using_ext_object_cache()
+		? (int) wp_cache_get( $key, 'ca_lockout' )
+		: (int) get_transient( $key );
+	return $count >= $max;
 }
 
 /**
  * Record one failed confirmation, arming the lockout once the cap is reached.
  *
- * The counter's TTL is refreshed on each failure, so sustained guessing keeps
- * the cooldown alive rather than letting it lapse mid-attack.
+ * Where a persistent object cache backs the site (Redis/Memcached), the counter
+ * is incremented atomically (wp_cache_add seeds it, wp_cache_incr bumps it) so
+ * concurrent guesses cannot each read the same value and advance it only once —
+ * the race that would otherwise let synchronized batches slip far past the bound.
+ * Without such a cache it falls back to a transient counter: best-effort (the
+ * read-modify-write is not atomic), but every attempt still costs a full password
+ * hash and the count converges as writes serialize. The cooldown TTL is seeded
+ * from the first failure.
  *
  * @param int $user_id
  */
@@ -732,8 +754,18 @@ function record_failed_confirm( int $user_id ) : void {
 	if ( max_attempts() <= 0 ) {
 		return;
 	}
-	$fails = (int) get_transient( lockout_key( $user_id ) ) + 1;
-	set_transient( lockout_key( $user_id ), $fails, lockout_seconds() );
+	$key = lockout_key( $user_id );
+	$ttl = lockout_seconds();
+
+	if ( wp_using_ext_object_cache() ) {
+		if ( ! wp_cache_add( $key, 1, 'ca_lockout', $ttl ) ) {
+			wp_cache_incr( $key, 1, 'ca_lockout' );
+		}
+		return;
+	}
+
+	$fails = (int) get_transient( $key ) + 1;
+	set_transient( $key, $fails, $ttl );
 }
 
 /**
@@ -742,7 +774,12 @@ function record_failed_confirm( int $user_id ) : void {
  * @param int $user_id
  */
 function clear_failed_confirms( int $user_id ) : void {
-	delete_transient( lockout_key( $user_id ) );
+	$key = lockout_key( $user_id );
+	if ( wp_using_ext_object_cache() ) {
+		wp_cache_delete( $key, 'ca_lockout' );
+		return;
+	}
+	delete_transient( $key );
 }
 
 add_action( 'user_profile_update_errors', __NAMESPACE__ . '\\gate', 10, 3 );
