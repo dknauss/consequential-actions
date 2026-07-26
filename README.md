@@ -13,22 +13,20 @@ runnable — not to be yet another standalone reauth plugin.
 
 > ## ⚠️ Do not run this on a production site
 >
-> The confirm field is an **un-throttled password oracle**, deliberately. All three
-> gates call `wp_check_password()` directly, which fires neither `wp_login_failed`
-> nor the `authenticate` chain — so failed guesses are invisible to the login
-> throttles that hook those (Limit Login Attempts, Wordfence, WP Fail2Ban), are not
-> rate-limited by this plugin, and are not logged anywhere.
+> The **wp-admin** confirm field is an un-throttled password oracle, deliberately.
+> The form and bulk gates call `wp_check_password()` directly, which fires neither
+> `wp_login_failed` nor the `authenticate` chain — so failed guesses are invisible
+> to the login throttles that hook those (Limit Login Attempts, Wordfence, WP
+> Fail2Ban), are not rate-limited by this plugin, and are not logged anywhere.
 >
-> The REST gate compounds it: nothing here distinguishes cookie auth from
-> Application-Password auth, so `POST /wp/v2/users/me` carrying
-> `ca_confirm_password` over a **leaked Application Password** is an unlimited,
-> unlogged yes/no oracle on the account's main password.
+> Reaching it requires a live admin session, which is exactly this MVP's stated
+> threat, so treat it as open. Throttling is the framework hardening this wedge
+> defers to WP Sudo ([PR #4](https://github.com/dknauss/consequential-actions/pull/4)
+> implemented a bounded lockout and was closed for scope, not correctness — the
+> branch is preserved).
 >
-> Installing this plugin therefore *adds* a password-guessing surface that did not
-> exist before. Throttling is the framework hardening this wedge defers to WP Sudo
-> ([PR #4](https://github.com/dknauss/consequential-actions/pull/4) implemented a
-> bounded lockout and was closed for scope, not correctness — the branch is
-> preserved).
+> **REST no longer accepts a password at all**, so that channel is closed for every
+> credential class — see [Two modes](#two-modes).
 >
 > Two further account-takeover routes are ungated: REST user deletion (deliberately
 > out of the MVP catalog) and Application-Password issuance (an oversight found while
@@ -47,7 +45,7 @@ today:
 | Surface | Operation | Gated? | Reauth mode | Tested |
 |---|---|:---:|---|:---:|
 | Profile / edit-user / new-user form | Change own/other password or email, promote a user to an admin-equivalent role, create user | ✅ | Window (default) or hardened force-logout | Unit + integration + manual Playground |
-| REST `/wp/v2/users` (cookie & Application Password) | Same account-takeover changes | ✅ | Shared window; actor password in the request only when the window is closed (else `403`) | Unit + integration + manual Playground |
+| REST `/wp/v2/users` (any credential) | Same account-takeover changes | ✅ | **Gated, not satisfiable from REST.** Passes only inside a window opened by confirming in wp-admin *in the same browser*; otherwise `403`. No password is accepted in the request | Unit + integration + manual Playground |
 | Users list — **bulk** "Change role → Administrator" | Promote to admin-equivalent | ✅ | Inline interstitial (password re-POST) or hardened force-logout | Unit + integration + manual Playground |
 | REST `/wp/v2/users/<id>/application-passwords` | Mint a durable API credential | ❌ *(ungated — the route pattern is anchored and does not match; the credential **survives** the password change this MVP protects)* | — | — |
 | REST `DELETE /wp/v2/users/<id>` | Delete a user | ❌ *(ungated — not in the MVP catalog)* | — | — |
@@ -62,8 +60,14 @@ today:
   or `action`/`action2` = `promote`). Gating *arbitrary* programmatic `set_role()`
   from custom code remains a different, effect-level problem left to WP Sudo (the
   `set_role()` row above).
-- **REST hardened mode.** The REST gate always uses the password-in-request / `403`
-  flow and does not force a logout, even when `CA_TERMINATE_SESSION` is set.
+- **REST hardened mode.** The REST gate always returns `403` and does not force a
+  logout, even when `CA_TERMINATE_SESSION` is set.
+- **REST cannot satisfy the gate on its own.** A gated action over REST is refused
+  unless the caller's own login session already holds a window opened in wp-admin.
+  This is deliberate — it is what removes the password-guessing channel — but it
+  does break legitimate API automation that changes emails, creates users, or
+  promotes roles. `POST /wp/v2/users` (user provisioning) is affected for **all**
+  API callers, not just the ones this MVP is arguing about.
 - **Coverage is unit + WordPress-integration.** The pure detectors have Brain\Monkey
   unit coverage, and all three gates have *automated* integration tests that drive the
   **real save paths** against a live WordPress + MySQL (`WP_UnitTestCase`): `FormGateTest`
@@ -102,7 +106,7 @@ explicitly WP Sudo's domain — not gaps this prototype intends to close.
 
 | Mode | How to enable | Behavior |
 |------|---------------|----------|
-| **Window** (default, recommended) | — | On a gated submit, a modal asks for your current password and submits it with the form (no scrolling, no re-entry). With JavaScript off, an inline "confirm your current password" field is the fallback and the server still enforces. A successful confirm opens a short "sudo window" (default 5 min; filter `ca_sudo_window`, return 0 to always re-challenge). Note: in this MVP the window is a per-user transient flag, **not** a session — it is not session/cookie-bound. A real implementation binds the window to the login session so logout revokes it (WP Sudo does; the [core spec](https://github.com/dknauss/Sudo/blob/main/docs/core-sudo-gate-implementation-spec.md) proposes storing it on `WP_Session_Tokens`). |
+| **Window** (default, recommended) | — | On a gated submit in wp-admin, a modal asks for your current password and submits it with the form (no scrolling, no re-entry). With JavaScript off, an inline "confirm your current password" field is the fallback and the server still enforces. A successful confirm opens a short "sudo window" (default 5 min; filter `ca_sudo_window`, return 0 to always re-challenge). The window is **bound to the login session that opened it** — the transient key mixes in a hash of `wp_get_session_token()` — so a second browser, a cloned cookie, or an Application Password cannot inherit it, and a caller with no login session can hold no window at all. REST therefore has no way to satisfy the gate on its own; that is deliberate, and it is what removes the password-guessing channel. |
 | **Hardened** (force-logout) | `define( 'CA_TERMINATE_SESSION', true );` | An unconfirmed gated action signs the user out and forces a full re-login before they can retry — a stricter opt-in, the literal reading of Trac #20140 comment 31. |
 
 ### The window is the primitive; force-logout is a stricter opt-in
@@ -177,9 +181,9 @@ the REST route for these actions — not just one screen. It also covers the Use
 landed). It does not reach every path to the same *effect*: arbitrary programmatic
 `set_role()` from custom code is **deliberately out of scope** (WP Sudo's domain). See [Scope and guarantees](#scope-and-guarantees). What it also does not add is
 per-surface *policy* (allow/block/deny tuning), stash-and-replay, or an
-interactive challenge for non-browser callers — a REST caller proves intent by
-resending with `ca_confirm_password`, or by confirming once in wp-admin to open
-the shared window.
+interactive challenge for non-browser callers. A REST caller cannot prove intent
+over REST at all: it must confirm in wp-admin, in the same browser, and reuse that
+session's window.
 
 ## How it works
 

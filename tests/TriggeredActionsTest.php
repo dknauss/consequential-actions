@@ -13,6 +13,7 @@ use PHPUnit\Framework\TestCase;
 use function ConsequentialActions\triggered_actions;
 use function ConsequentialActions\window_seconds;
 use function ConsequentialActions\confirmed_recently;
+use function ConsequentialActions\confirm_key;
 
 final class TriggeredActionsTest extends TestCase {
 
@@ -219,6 +220,9 @@ final class TriggeredActionsTest extends TestCase {
 			}
 		);
 		Functions\when( 'get_current_user_id' )->justReturn( 5 );
+		// A browser session is behind the request; the sessionless case is
+		// covered by test_no_session_token_means_no_window().
+		Functions\when( 'wp_get_session_token' )->justReturn( 'browser-session-token' );
 		// Even if a stale confirm transient exists (and no forced-relogin one-shot),
 		// a 0 window must short-circuit to false.
 		Functions\when( 'get_transient' )->alias(
@@ -232,6 +236,9 @@ final class TriggeredActionsTest extends TestCase {
 
 	public function test_recently_confirmed_true_within_window() : void {
 		Functions\when( 'get_current_user_id' )->justReturn( 5 );
+		// A browser session is behind the request; the sessionless case is
+		// covered by test_no_session_token_means_no_window().
+		Functions\when( 'wp_get_session_token' )->justReturn( 'browser-session-token' );
 		// Confirm transient present, no forced-relogin one-shot → true via the window.
 		Functions\when( 'get_transient' )->alias(
 			static function ( $key ) {
@@ -251,6 +258,9 @@ final class TriggeredActionsTest extends TestCase {
 			}
 		);
 		Functions\when( 'get_current_user_id' )->justReturn( 5 );
+		// A browser session is behind the request; the sessionless case is
+		// covered by test_no_session_token_means_no_window().
+		Functions\when( 'wp_get_session_token' )->justReturn( 'browser-session-token' );
 		$store = array( 'ca_reauthed_5' => 1 );
 		Functions\when( 'get_transient' )->alias(
 			static function ( $key ) use ( &$store ) {
@@ -266,5 +276,35 @@ final class TriggeredActionsTest extends TestCase {
 
 		$this->assertTrue( confirmed_recently(), 'one-shot honored despite window=0' );
 		$this->assertFalse( confirmed_recently(), 'one-shot consumed after one use' );
+	}
+
+	/**
+	 * A caller with no login session — Application Password, JWT, OAuth, CLI —
+	 * has no session token, so it can hold no window no matter what transients
+	 * exist for that user. This is the property that makes the fix cover every
+	 * bearer credential rather than only core Application Passwords.
+	 */
+	public function test_no_session_token_means_no_window() : void {
+		Functions\when( 'get_current_user_id' )->justReturn( 5 );
+		Functions\when( 'wp_get_session_token' )->justReturn( '' );
+		// Both a live confirm transient AND a forced-relogin one-shot are present.
+		Functions\when( 'get_transient' )->justReturn( time() );
+
+		$this->assertSame( '', confirm_key( 5 ), 'no session ⇒ no addressable window' );
+		$this->assertFalse(
+			confirmed_recently(),
+			'a sessionless caller must not inherit a window, nor consume the one-shot'
+		);
+	}
+
+	public function test_confirm_key_is_distinct_per_session_and_hides_the_token() : void {
+		Functions\when( 'wp_get_session_token' )->justReturn( 'token-one' );
+		$first = confirm_key( 5 );
+
+		Functions\when( 'wp_get_session_token' )->justReturn( 'token-two' );
+		$second = confirm_key( 5 );
+
+		$this->assertNotSame( $first, $second, 'each session addresses its own window' );
+		$this->assertStringNotContainsString( 'token-two', $second, 'the token must not land in an option name' );
 	}
 }

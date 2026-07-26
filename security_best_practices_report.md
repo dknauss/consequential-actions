@@ -1,10 +1,8 @@
 # Consequential Actions security review
 
-> **Re-run against `main` after the bulk-promote gate (#3) and the integration
-> suite (#11) landed.** Line references and the test count in the previous
-> revision were stale by ~400 lines and 3×; two findings (CA-3, CA-4) had been
-> fixed but were still reported as open. Both are now marked resolved, and two
-> previously-unreported gaps (CA-6, CA-7) are added.
+> **Re-run after the session-bound window landed.** CA-1 is fixed and CA-2 is
+> downgraded and narrowed — the REST password channel is gone entirely. Line
+> references are re-derived against the current file.
 
 ## Executive summary
 
@@ -12,7 +10,11 @@ The plugin does what it says for the three user-management surfaces it enumerate
 
 I did not find a direct unauthenticated vulnerability, SQL injection, arbitrary file access, REST permission bypass, or XSS in first-party code.
 
-The security limitations are design/scope issues, and one of them has grown more serious as the REST gate matured. In descending order: the confirm field is an **un-throttled password oracle** reachable over an Application-Password-authenticated request (CA-2, now **High**); the sudo window is per-user rather than session-bound, so the legitimate browser's confirmation elevates every concurrent session and credential for that account (CA-1); and two account-takeover-adjacent REST routes go ungated — one outside the gate's route pattern (CA-6), one admitted by the pattern but excluded by its method filter (CA-7). These are documented or deliberate to varying degrees, but they matter precisely because this artifact is offered as a *security* demonstration.
+The remaining limitations are design/scope issues. In descending order: the wp-admin confirm field is still an un-throttled password oracle, reachable by a caller who already holds an admin session (CA-2 — no longer reachable over REST); two account-takeover-adjacent REST routes go ungated, one outside the gate's route pattern (CA-6), one admitted by the pattern but excluded by its method filter (CA-7); and hardened mode's pending marker stays per-user, though only a browser can consume it (CA-5).
+
+Two findings closed in this revision. **CA-1** — the window was a bare per-user transient, so one browser's confirmation elevated every concurrent session and credential on the account — is fixed by binding the window to the login session that opened it. And the REST gate no longer accepts a password at all, which removes the guessing channel for every bearer credential rather than special-casing Application Passwords.
+
+A live gate bypass was also found and fixed alongside: the plugin's route pattern was case-sensitive while core's dispatcher matches case-insensitively, so `POST /wp/v2/Users/me` dispatched normally and skipped the gate entirely.
 
 ## Verification performed
 
@@ -27,31 +29,27 @@ The security limitations are design/scope issues, and one of them has grown more
 
 ## Findings
 
-### High: CA-2 — The confirm field is an un-throttled password oracle
+### Medium: CA-2 — The wp-admin confirm field is an un-throttled password oracle
 
-**Location:** `consequential-actions.php:318` (REST), `:489` (form), `:646` (bulk)
+**Location:** `consequential-actions.php:489` (form), `:646` (bulk)
 
-All three gates verify the actor's password by calling `wp_check_password()` directly. That is the *correct* credential to check — it is the whole point of the wedge — but the call bypasses the login pipeline entirely. `wp_check_password()` fires only the `check_password` filter; it never fires `wp_login_failed` and never runs the `authenticate` / `wp_authenticate_user` chain. The mainstream throttles that hook those (Limit Login Attempts Reloaded, Wordfence, WP Fail2Ban) therefore **never see a failed confirm**. WP Sudo does not see one either, for a different reason: its lockout is an internal counter inside its own reauth flow (`_wp_sudo_failed_attempts`), not a `wp_login_failed` listener, so it counts only its own challenges. There is no first-party counter, cooldown, or cap either, and no `do_action` fires on failure, so the attempts are not auditable.
+**Downgraded from High, and narrowed from three call sites to two.** The REST call site is gone: `gate_rest()` no longer reads the confirm field or calls `wp_check_password()` at all, so there is no password-guessing channel over the API for any credential class.
 
-The REST gate makes this materially worse than the previous revision recorded. It reads the guess from `$request->get_param( CONFIRM_FIELD )` with no nonce requirement, and nothing in the plugin distinguishes cookie authentication from Application-Password authentication. So `POST /wp/v2/users/me` with `{"email":"…","ca_confirm_password":"<guess>"}` over a leaked Application Password is an **unlimited, unlogged yes/no oracle on the account's main password** — and a correct guess is the takeover the plugin exists to prevent.
+What remains: the form and bulk gates verify the actor's password by calling `wp_check_password()` directly, which bypasses the login pipeline. `wp_check_password()` fires only the `check_password` filter; it never fires `wp_login_failed` and never runs the `authenticate` / `wp_authenticate_user` chain. The mainstream throttles that hook those (Limit Login Attempts Reloaded, Wordfence, WP Fail2Ban) therefore never see a failed confirm. WP Sudo does not see one either, for a different reason: its lockout is an internal counter inside its own reauth flow (`_wp_sudo_failed_attempts`), not a `wp_login_failed` listener. There is no first-party counter, and no `do_action` fires on failure, so attempts are not auditable.
 
-**Impact:** Installing the plugin adds a password-guessing surface that did not exist beforehand, and the demo's own antagonist (a stolen session / leaked credential) is exactly the actor who can use it.
+**Why still Medium rather than Low:** reaching these two sites requires a live authenticated admin session with a valid nonce — which is precisely this artifact's stated threat model. A stolen cookie can scrape a nonce from any admin page in one request. So for the threat the demo dramatises, the oracle is open; it is simply no longer reachable by a bearer token with no browser session.
 
-**Recommended fix:** Stop accepting a login password over an API-credential channel — block Application-Password callers at the REST gate, or require cookie auth for the confirm. Then bound failed attempts on every direct verifier. [PR #4](https://github.com/dknauss/consequential-actions/pull/4) implemented precisely this bound (counter, 5 attempts / 5-minute cooldown, `ca_max_attempts` / `ca_lockout_seconds` filters, REST `429`, and an atomic reserve-before-check) and was review-clean; it was closed for **scope**, not correctness, and the branch is preserved. Until one of those lands, the README and readme.txt must say plainly that this is not safe to run on a real site.
+**Recommended fix:** bound failed attempts on the two remaining verifiers. [PR #4](https://github.com/dknauss/consequential-actions/pull/4) implemented exactly this and was review-clean; it was closed for **scope**, not correctness, and the branch is preserved. Tracked in [#13](https://github.com/dknauss/consequential-actions/issues/13).
 
-### Medium: CA-1 — Sudo confirmation is per-user, not session-bound
+### ✅ CA-1 — Sudo confirmation was per-user, not session-bound — **FIXED**
 
-**Location:** `consequential-actions.php:843-845` (`confirm_key()`), `:868-880` (`confirmed_recently()`)
+`confirm_key()` now mixes a hash of `wp_get_session_token()` into the transient key, so a window belongs to the login session that opened it. A second browser, a cloned cookie, or an API credential cannot inherit it, and a caller with **no** login session gets an empty key — it can neither open a window nor read one. That covers every bearer credential (Application Password, JWT, OAuth, CLI), not only the one core exposes a getter for.
 
-`confirm_key()` returns `'ca_confirmed_' . $user_id`, and `confirmed_recently()` trusts that transient for the current user. One successful confirmation opens the window for **every session, device, and Application Password** for that account until the TTL expires (default 5 minutes, `ca_sudo_window`).
+The raw token is hashed rather than stored, since the key becomes an option name and a session token is a credential.
 
-The plugin advertises this cross-surface sharing as a convenience feature at `:278-280` ("a confirm in wp-admin also lets a follow-up REST call through for the window"). In the stolen-cookie threat model the plugin is demonstrating, that is backwards: **the legitimate admin's keystroke is what unlocks the attacker's channel.**
+Regression coverage: `tests/Integration/WindowBindingTest.php` asserts a window from one session does not elevate another, that a sessionless caller can neither inherit nor open one, and that the legitimate same-session flow still works.
 
-**Impact:** A concurrent stolen session inherits the elevation window. This is the central failure the wedge argues core should close, so leaving it open in the default configuration undercuts the argument.
-
-**Aggravating factor:** `demo/mu-narrator.php:19` sets `add_filter( 'ca_sudo_window', '__return_zero' )`, so the Playground walkthrough — the artifact most reviewers will actually run — never exercises the window and therefore never exposes this weakness. The demo demonstrates a stricter system than the README recommends.
-
-**Recommended fix:** Bind the confirmation to the current session token — include `wp_get_session_token()` (hashed) in the transient key, or store it in session-token metadata. Failing that, ship the demo at the real default so the limitation is visible.
+**Residual:** a session hijacked *within its own* open window still inherits that window. That is inherent to any window primitive and is why the TTL is short (`ca_sudo_window`, default 5 min; return 0 to always re-challenge).
 
 ### Medium: CA-6 — Application Password issuance is outside the gate's route pattern
 
@@ -71,13 +69,13 @@ The method filter admits only `POST`, `PUT`, `PATCH`; `DELETE` passes through. T
 
 **Recommended fix:** Add a row to the scope matrix. Gating it is optional for an MVP; silently omitting it from the table is not.
 
-### Low: CA-5 — Hardened-mode pending marker is also per-user
+### Low: CA-5 — Hardened-mode pending marker is still per-user
 
-**Location:** `consequential-actions.php:851-866` (`pending_key()` / `reauthed_key()`), `:868-880`
+**Location:** `consequential-actions.php:851-866` (`pending_key()` / `reauthed_key()`)
 
-Hardened mode destroys the current session and sets a pending marker by user ID; after the next login for that user it opens the same per-user window. Consistent with the documented transient limitation, but less precise than session-bound reauth state. Same root cause as CA-1.
+**Partially mitigated.** These two markers remain keyed per-user, and deliberately so: the pending marker has to survive the forced logout that creates it, so there is no session to bind it to at write time. (Binding at `wp_login` would not work either — the new auth cookie is not yet in `$_COOKIE` on that request, so the key would be unreadable afterwards.)
 
-**Recommended fix:** Include the post-login session token in the resulting confirmed state.
+What changed: `confirmed_recently()` now only honours the one-time pass when the request carries a login session, so a bearer credential racing the victim's re-login cannot consume it. The marker is per-user; the *consumption* is browser-only.
 
 ## Resolved since the previous revision
 
