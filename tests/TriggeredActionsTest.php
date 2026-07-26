@@ -15,6 +15,7 @@ use function ConsequentialActions\window_seconds;
 use function ConsequentialActions\confirmed_recently;
 use function ConsequentialActions\confirm_key;
 use function ConsequentialActions\on_login;
+use function ConsequentialActions\verified_session_token;
 
 final class TriggeredActionsTest extends TestCase {
 
@@ -363,5 +364,30 @@ final class TriggeredActionsTest extends TestCase {
 			'a forced re-login must leave a one-time pass even when a window is configured'
 		);
 		$this->assertArrayNotHasKey( 'ca_reauth_pending_5', $store, 'the pending marker is consumed' );
+	}
+
+	/**
+	 * The negative verify branch: a NON-empty token that is not one of the
+	 * user's live sessions must be rejected.
+	 *
+	 * This is the shape of the original defect — wp_get_session_token() only
+	 * parses the cookie, so a forged one yields a non-empty token. Testing for
+	 * emptiness passed; only verification catches it. Without this test the
+	 * regression is invisible to the unit suite: forcing verify() to true keeps
+	 * every other unit test green.
+	 */
+	public function test_an_unverified_token_is_not_a_session() : void {
+		Functions\when( 'get_current_user_id' )->justReturn( 5 );
+		Functions\when( 'wp_get_session_token' )->justReturn( 'forged-but-not-empty' );
+		\WP_Session_Tokens::$valid = array( 'a-real-session' ); // the forged one is absent
+		Functions\when( 'get_transient' )->justReturn( time() );
+
+		$this->assertSame(
+			'',
+			verified_session_token( 5 ),
+			'a token absent from the session store must not be trusted'
+		);
+		$this->assertSame( '', confirm_key( 5 ) );
+		$this->assertFalse( confirmed_recently(), 'and it must not unlock a window or the one-shot' );
 	}
 }

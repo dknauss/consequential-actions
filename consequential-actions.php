@@ -311,7 +311,12 @@ function gate_rest( $result, $server, $request ) {
 		return $result;
 	}
 
-	$target_seg = $m[1] ?? '';
+	// Lower-cased because the route match above is case-insensitive, to mirror
+	// core's dispatcher. Without this the 'me' comparison below silently fails
+	// on `/wp/v2/users/ME`: $existing stays null, the email change is never
+	// detected, and the request passes ungated — the same bypass the regex flag
+	// closed, one line further down.
+	$target_seg = strtolower( $m[1] ?? '' );
 	$is_update  = ( '' !== $target_seg ); // POST/PUT to /users/<id|me> = update; POST to /users = create.
 	$existing   = null;
 	if ( $is_update ) {
@@ -831,6 +836,13 @@ function on_login( $user_login, $user = null ) : void {
 		// So always grant the one-time pass. confirmed_recently() consumes it on
 		// the next request, which does carry a verified session, and opens the
 		// real session-bound window at that point.
+		//
+		// Note the window is therefore anchored at *consumption*, not at login,
+		// so total elevation after a forced re-login can reach this TTL plus
+		// ca_sudo_window. That is deliberate — the re-login is a genuine fresh
+		// authentication, so earning a full window from the moment it is used
+		// matches what mark_confirmed() did here before the window was bound —
+		// but it is the reason this TTL is kept short rather than open-ended.
 		set_transient( reauthed_key( (int) $user->ID ), 1, 15 * MINUTE_IN_SECONDS );
 	}
 }

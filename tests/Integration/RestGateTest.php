@@ -105,16 +105,37 @@ final class RestGateTest extends WP_UnitTestCase {
 	 * (WP_REST_Server::dispatch, '@^' . $route . '$@i'), so a case-varied path
 	 * dispatches normally and must not slip past the gate.
 	 */
-	public function test_mixed_case_route_is_still_gated(): void {
-		$req = new WP_REST_Request( 'POST', '/wp/v2/Users/me' );
+	public function case_varied_routes(): array {
+		return array(
+			'collection segment' => array( '/wp/v2/Users/me' ),
+			// The 'me' segment matters independently: the route regex is
+			// case-insensitive, so `/users/ME` matches and $m[1] is 'ME'. If the
+			// target segment is not lower-cased, `'me' === 'ME'` is false,
+			// (int) 'ME' is 0, $existing stays null, and triggered_actions_rest()
+			// never detects the email change — ungated commit.
+			'me segment'         => array( '/wp/v2/users/ME' ),
+			'both segments'      => array( '/wp/v2/Users/Me' ),
+		);
+	}
+
+	/**
+	 * Core's REST dispatcher matches routes case-insensitively
+	 * (WP_REST_Server::dispatch, '@^' . $route . '$@i'), so a case-varied path
+	 * dispatches normally and must not slip past the gate.
+	 *
+	 * @dataProvider case_varied_routes
+	 * @param string $route Route to attempt the gated change on.
+	 */
+	public function test_case_varied_routes_are_still_gated( string $route ): void {
+		$req = new WP_REST_Request( 'POST', $route );
 		$req->set_param( 'email', 'case-bypass@example.test' );
 		$res = rest_do_request( $req );
 
-		$this->assertSame( 403, $res->get_status() );
+		$this->assertSame( 403, $res->get_status(), $route . ' must be gated' );
 		$this->assertSame(
 			'admin-rest@example.test',
 			get_userdata( $this->admin_id )->user_email,
-			'a mixed-case route must not bypass the gate'
+			$route . ' must not commit the change'
 		);
 	}
 }
