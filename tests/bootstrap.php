@@ -28,4 +28,35 @@ if ( ! function_exists( 'add_filter' ) ) {
 	function add_filter() {}
 }
 
+// Minimal WP_User stand-in: on_login() type-checks its argument against it.
+// Only the ID property is read.
+if ( ! class_exists( 'WP_User' ) ) {
+	class WP_User {
+		public $ID;
+
+		public function __construct( int $id = 0 ) {
+			$this->ID = $id;
+		}
+	}
+}
+
+// Minimal WP_Session_Tokens stand-in. verified_session_token() asks it whether a
+// token is one of the user's live sessions; tests declare which tokens are live
+// via the $valid list, so the verification branch is genuinely exercised rather
+// than stubbed away.
+if ( ! class_exists( 'WP_Session_Tokens' ) ) {
+	class WP_Session_Tokens {
+		/** @var string[] Tokens this stub treats as live sessions. */
+		public static $valid = array();
+
+		public static function get_instance( $user_id ) {
+			return new self();
+		}
+
+		public function verify( $token ) {
+			return in_array( $token, self::$valid, true );
+		}
+	}
+}
+
 require_once __DIR__ . '/../consequential-actions.php';

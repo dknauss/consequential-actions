@@ -820,16 +820,18 @@ function on_login( $user_login, $user = null ) : void {
 	}
 	if ( get_transient( pending_key( (int) $user->ID ) ) ) {
 		delete_transient( pending_key( (int) $user->ID ) );
-		mark_confirmed( (int) $user->ID );
-		// A forced re-login IS the reauthentication. When the window is disabled
-		// (ca_sudo_window = 0), mark_confirmed() stores nothing, so grant a one-time
-		// pass to authorize the retry — otherwise hardened mode loops the user
-		// straight back out. Only in zero-window mode: when a window IS configured,
-		// mark_confirmed() already covers the retry, and a longer-lived one-shot
-		// would let reauth outlive ca_sudo_window.
-		if ( window_seconds() <= 0 ) {
-			set_transient( reauthed_key( (int) $user->ID ), 1, 15 * MINUTE_IN_SECONDS );
-		}
+
+		// A forced re-login IS the reauthentication, but it cannot be recorded as
+		// a window here: wp_login fires after wp_set_auth_cookie(), which only
+		// calls setcookie() — it never populates $_COOKIE — and the browser was
+		// logged out, so this request carries no login cookie at all. There is
+		// therefore no session token to bind to yet, and mark_confirmed() would
+		// silently store nothing.
+		//
+		// So always grant the one-time pass. confirmed_recently() consumes it on
+		// the next request, which does carry a verified session, and opens the
+		// real session-bound window at that point.
+		set_transient( reauthed_key( (int) $user->ID ), 1, 15 * MINUTE_IN_SECONDS );
 	}
 }
 
@@ -854,12 +856,42 @@ function on_login( $user_login, $user = null ) : void {
  * @return string Transient key, or '' when the request has no login session.
  */
 function confirm_key( int $user_id ) : string {
-	$token = wp_get_session_token();
+	$token = verified_session_token( $user_id );
 	if ( '' === $token ) {
 		return '';
 	}
 
 	return 'ca_confirmed_' . $user_id . '_' . substr( hash( 'sha256', $token ), 0, 20 );
+}
+
+/**
+ * The current request's session token, but only if it is genuinely one of this
+ * user's live sessions.
+ *
+ * wp_get_session_token() is NOT a validator. It reads wp_parse_auth_cookie(),
+ * which explodes the cookie on '|', checks that there are four parts, and
+ * returns them — it verifies no HMAC and no expiry. So any caller can make
+ * wp_get_session_token() return a non-empty string just by attaching
+ * `Cookie: wordpress_logged_in_<hash>=a|b|c|d`. Testing it for emptiness is
+ * therefore a check the attacker can simply switch off.
+ *
+ * WP_Session_Tokens::verify() is the real test: it looks the token up in the
+ * user's own session store, so a forged or expired one fails.
+ *
+ * @param int $user_id User whose sessions the token must belong to.
+ * @return string The verified token, or '' if there is no valid login session.
+ */
+function verified_session_token( int $user_id ) : string {
+	if ( $user_id <= 0 ) {
+		return '';
+	}
+
+	$token = wp_get_session_token();
+	if ( '' === $token ) {
+		return '';
+	}
+
+	return \WP_Session_Tokens::get_instance( $user_id )->verify( $token ) ? $token : '';
 }
 
 /**
@@ -888,11 +920,14 @@ function confirmed_recently() : bool {
 
 	// Hardened mode's one-time pass stays keyed per-user: it has to survive the
 	// forced logout that creates it, so there is no session to bind it to at
-	// write time. Only a caller holding a login session may consume it, though —
-	// the mode forces a *browser* re-login, so a bearer credential racing for
-	// the pass must not be able to take it.
-	if ( '' !== wp_get_session_token() && get_transient( reauthed_key( $uid ) ) ) {
+	// write time. Only a caller holding a *verified* login session may consume
+	// it — the mode forces a browser re-login, so a bearer credential (or a
+	// forged cookie) racing for the pass must not be able to take it.
+	if ( '' !== verified_session_token( $uid ) && get_transient( reauthed_key( $uid ) ) ) {
 		delete_transient( reauthed_key( $uid ) );
+		// A real session exists now, which it did not at wp_login time, so this
+		// is the first moment the window the re-login earned can be bound.
+		mark_confirmed( $uid );
 		return true;
 	}
 

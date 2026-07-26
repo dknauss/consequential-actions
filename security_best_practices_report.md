@@ -2,7 +2,7 @@
 
 > **Re-run after the session-bound window landed.** CA-1 is fixed and CA-2 is
 > downgraded and narrowed — the REST password channel is gone entirely. Line
-> references are re-derived against the current file.
+> references are re-derived against the current file and spot-checked line by line.
 
 ## Executive summary
 
@@ -31,7 +31,7 @@ A live gate bypass was also found and fixed alongside: the plugin's route patter
 
 ### Medium: CA-2 — The wp-admin confirm field is an un-throttled password oracle
 
-**Location:** `consequential-actions.php:489` (form), `:646` (bulk)
+**Location:** `consequential-actions.php:486` (form), `:643` (bulk)
 
 **Downgraded from High, and narrowed from three call sites to two.** The REST call site is gone: `gate_rest()` no longer reads the confirm field or calls `wp_check_password()` at all, so there is no password-guessing channel over the API for any credential class.
 
@@ -53,7 +53,7 @@ Regression coverage: `tests/Integration/WindowBindingTest.php` asserts a window 
 
 ### Medium: CA-6 — Application Password issuance is outside the gate's route pattern
 
-**Location:** `consequential-actions.php:293`
+**Location:** `consequential-actions.php:306`
 
 The REST route test is `preg_match( '#^/wp/v2/users(?:/(me|\d+))?$#', … )`. The pattern is anchored, so it does **not** match `/wp/v2/users/me/application-passwords` — a real core route (`WP_REST_Application_Passwords_Controller`, `rest_base = 'users/(?P<user_id>(?:[\d]+|me))/application-passwords'`).
 
@@ -63,7 +63,7 @@ The REST route test is `preg_match( '#^/wp/v2/users(?:/(me|\d+))?$#', … )`. Th
 
 ### Low: CA-7 — REST user deletion passes through
 
-**Location:** `consequential-actions.php:297`
+**Location:** `consequential-actions.php:310`
 
 The method filter admits only `POST`, `PUT`, `PATCH`; `DELETE` passes through. This is intentional and carries a code comment ("delete-user is not in this MVP catalog"), but "delete the site's other administrators" is part of the takeover narrative the demo tells, and the scope matrix does not mention it.
 
@@ -71,7 +71,7 @@ The method filter admits only `POST`, `PUT`, `PATCH`; `DELETE` passes through. T
 
 ### Low: CA-5 — Hardened-mode pending marker is still per-user
 
-**Location:** `consequential-actions.php:851-866` (`pending_key()` / `reauthed_key()`)
+**Location:** `consequential-actions.php:901-916` (`pending_key()` / `reauthed_key()`)
 
 **Partially mitigated.** These two markers remain keyed per-user, and deliberately so: the pending marker has to survive the forced logout that creates it, so there is no session to bind it to at write time. (Binding at `wp_login` would not work either — the new auth cookie is not yet in `$_COOKIE` on that request, so the key would be unreadable afterwards.)
 
@@ -81,11 +81,11 @@ What changed: `confirmed_recently()` now only honours the one-time pass when the
 
 ### ✅ CA-3 — Promotion detection only gated the literal `administrator` role — **FIXED**
 
-`role_change_escalates()` (`consequential-actions.php:357-408`) now compares **effective sensitive capabilities** (`manage_options`, `promote_users`, `edit_users`, `delete_users`, `create_users`, `activate_plugins`, `install_plugins`, `update_core`, …) against the capabilities the user already holds, rather than matching the role slug. Custom administrator-equivalent roles are caught. Bulk promotion is covered by the same predicate via `escalating_bulk_targets()` (`:427-445`).
+`role_change_escalates()` (`consequential-actions.php:354-405`) now compares **effective sensitive capabilities** (`manage_options`, `promote_users`, `edit_users`, `delete_users`, `create_users`, `activate_plugins`, `install_plugins`, `update_core`, …) against the capabilities the user already holds, rather than matching the role slug. Custom administrator-equivalent roles are caught. Bulk promotion is covered by the same predicate via `escalating_bulk_targets()` (`:424-442`).
 
 ### ✅ CA-4 — Error message labels should be escaped individually — **FIXED**
 
-`consequential-actions.php:494-502` maps every registry label through `esc_html()` before `implode()`. Correctly **not** applied in `gate_rest()` (`:324-328`), where the labels go into a JSON payload rather than an HTML sink.
+`consequential-actions.php:491-499` maps every registry label through `esc_html()` before `implode()`. (The REST gate no longer builds a label list at all — the whole payload was removed with the confirm field, so the JSON-sink carve-out this finding used to note is moot.)
 
 ## Positive notes
 

@@ -14,6 +14,7 @@ use function ConsequentialActions\triggered_actions;
 use function ConsequentialActions\window_seconds;
 use function ConsequentialActions\confirmed_recently;
 use function ConsequentialActions\confirm_key;
+use function ConsequentialActions\on_login;
 
 final class TriggeredActionsTest extends TestCase {
 
@@ -32,6 +33,7 @@ final class TriggeredActionsTest extends TestCase {
 	}
 
 	protected function tearDown() : void {
+		\WP_Session_Tokens::$valid = array();
 		$_POST = array();
 		Monkey\tearDown();
 		parent::tearDown();
@@ -223,6 +225,7 @@ final class TriggeredActionsTest extends TestCase {
 		// A browser session is behind the request; the sessionless case is
 		// covered by test_no_session_token_means_no_window().
 		Functions\when( 'wp_get_session_token' )->justReturn( 'browser-session-token' );
+		\WP_Session_Tokens::$valid = array( 'browser-session-token' );
 		// Even if a stale confirm transient exists (and no forced-relogin one-shot),
 		// a 0 window must short-circuit to false.
 		Functions\when( 'get_transient' )->alias(
@@ -239,6 +242,7 @@ final class TriggeredActionsTest extends TestCase {
 		// A browser session is behind the request; the sessionless case is
 		// covered by test_no_session_token_means_no_window().
 		Functions\when( 'wp_get_session_token' )->justReturn( 'browser-session-token' );
+		\WP_Session_Tokens::$valid = array( 'browser-session-token' );
 		// Confirm transient present, no forced-relogin one-shot → true via the window.
 		Functions\when( 'get_transient' )->alias(
 			static function ( $key ) {
@@ -261,6 +265,7 @@ final class TriggeredActionsTest extends TestCase {
 		// A browser session is behind the request; the sessionless case is
 		// covered by test_no_session_token_means_no_window().
 		Functions\when( 'wp_get_session_token' )->justReturn( 'browser-session-token' );
+		\WP_Session_Tokens::$valid = array( 'browser-session-token' );
 		$store = array( 'ca_reauthed_5' => 1 );
 		Functions\when( 'get_transient' )->alias(
 			static function ( $key ) use ( &$store ) {
@@ -298,6 +303,8 @@ final class TriggeredActionsTest extends TestCase {
 	}
 
 	public function test_confirm_key_is_distinct_per_session_and_hides_the_token() : void {
+		\WP_Session_Tokens::$valid = array( 'token-one', 'token-two' );
+
 		Functions\when( 'wp_get_session_token' )->justReturn( 'token-one' );
 		$first = confirm_key( 5 );
 
@@ -306,5 +313,55 @@ final class TriggeredActionsTest extends TestCase {
 
 		$this->assertNotSame( $first, $second, 'each session addresses its own window' );
 		$this->assertStringNotContainsString( 'token-two', $second, 'the token must not land in an option name' );
+	}
+
+	/**
+	 * Hardened mode, producing half: a forced re-login must always leave the
+	 * one-time pass, whatever ca_sudo_window is set to.
+	 *
+	 * It used to be granted only when the window was disabled, on the reasoning
+	 * that mark_confirmed() covered the windowed case. Once the window became
+	 * session-bound that stopped being true — wp_login fires before the new
+	 * cookie is in $_COOKIE, so there is no session to bind to and nothing was
+	 * recorded, looping the user logout → login → retry → logout forever.
+	 * confirmed_recently() opens the real window when it consumes the pass.
+	 */
+	public function test_forced_relogin_grants_the_one_shot_even_with_a_window_configured() : void {
+		if ( ! defined( 'CA_TERMINATE_SESSION' ) ) {
+			define( 'CA_TERMINATE_SESSION', true );
+		}
+		// A NON-zero window — the configuration that used to loop.
+		Functions\when( 'apply_filters' )->alias(
+			static function ( $tag, $value ) {
+				return 'ca_sudo_window' === $tag ? 300 : $value;
+			}
+		);
+		$store = array( 'ca_reauth_pending_5' => 1 );
+		Functions\when( 'get_transient' )->alias(
+			static function ( $key ) use ( &$store ) {
+				return $store[ $key ] ?? false;
+			}
+		);
+		Functions\when( 'delete_transient' )->alias(
+			static function ( $key ) use ( &$store ) {
+				unset( $store[ $key ] );
+				return true;
+			}
+		);
+		Functions\when( 'set_transient' )->alias(
+			static function ( $key, $value ) use ( &$store ) {
+				$store[ $key ] = $value;
+				return true;
+			}
+		);
+
+		on_login( 'someone', new \WP_User( 5 ) );
+
+		$this->assertArrayHasKey(
+			'ca_reauthed_5',
+			$store,
+			'a forced re-login must leave a one-time pass even when a window is configured'
+		);
+		$this->assertArrayNotHasKey( 'ca_reauth_pending_5', $store, 'the pending marker is consumed' );
 	}
 }

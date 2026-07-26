@@ -131,4 +131,71 @@ final class WindowBindingTest extends WP_UnitTestCase {
 		$this->assertSame( 200, $res->get_status() );
 		$this->assertSame( 'same-session@example.test', get_userdata( $this->admin_id )->user_email );
 	}
+
+	/**
+	 * wp_get_session_token() only *parses* the cookie — wp_parse_auth_cookie()
+	 * explodes on '|', counts four parts, and returns them, verifying no HMAC
+	 * and no expiry. So a caller with no session at all can make it non-empty.
+	 * Nothing may trust it without verifying the token against the user's own
+	 * session store.
+	 */
+	public function test_a_forged_login_cookie_is_not_a_session(): void {
+		$_COOKIE[ LOGGED_IN_COOKIE ] = 'someone|9999999999|forged-token|deadbeef';
+
+		$this->assertSame(
+			'',
+			\ConsequentialActions\verified_session_token( $this->admin_id ),
+			'a forged cookie must not pass as a live session'
+		);
+		$this->assertSame( '', confirm_key( $this->admin_id ) );
+		$this->assertFalse( confirmed_recently() );
+	}
+
+	/**
+	 * The forged cookie must not be able to consume hardened mode's one-time
+	 * pass, which is keyed per-user and so is the one piece of state a
+	 * sessionless caller could otherwise race the victim for.
+	 */
+	public function test_a_forged_cookie_cannot_consume_the_hardened_one_shot(): void {
+		set_transient( \ConsequentialActions\reauthed_key( $this->admin_id ), 1, 900 );
+		$_COOKIE[ LOGGED_IN_COOKIE ] = 'someone|9999999999|forged-token|deadbeef';
+
+		$this->assertFalse( confirmed_recently(), 'a forged cookie must not consume the one-shot' );
+		$this->assertNotFalse(
+			get_transient( \ConsequentialActions\reauthed_key( $this->admin_id ) ),
+			'and must not burn it either — the real browser still needs it'
+		);
+	}
+
+	/**
+	 * Hardened mode, consumption half: the one-time pass a forced re-login
+	 * leaves behind must authorize the retry AND open the session-bound window,
+	 * because that first post-login request is the earliest moment a session
+	 * exists to bind to.
+	 *
+	 * Regression guard: binding the window initially broke hardened mode
+	 * outright. on_login() runs before the new cookie is in $_COOKIE, so
+	 * mark_confirmed() there silently stored nothing, and with a non-zero window
+	 * the user looped logout → login → retry → logout forever.
+	 *
+	 * The producing half (on_login always granting the pass) is covered in the
+	 * unit suite, where CA_TERMINATE_SESSION can be defined without forcing
+	 * every other integration test down the logout path.
+	 */
+	public function test_hardened_one_shot_authorizes_the_retry_and_opens_the_window(): void {
+		set_transient( \ConsequentialActions\reauthed_key( $this->admin_id ), 1, 900 );
+
+		// The first request after the forced re-login carries a real session.
+		$this->start_session( $this->admin_id );
+
+		$this->assertTrue( confirmed_recently(), 'the retry after a forced re-login must be authorized' );
+		$this->assertFalse(
+			get_transient( \ConsequentialActions\reauthed_key( $this->admin_id ) ),
+			'the one-shot is consumed'
+		);
+		$this->assertTrue(
+			confirmed_recently(),
+			'and the window it opened covers the rest of the TTL, so the user is not looped out'
+		);
+	}
 }
