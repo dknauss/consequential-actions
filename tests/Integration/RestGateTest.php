@@ -54,22 +54,88 @@ final class RestGateTest extends WP_UnitTestCase {
 		$this->assertSame( 'admin-rest@example.test', get_userdata( $this->admin_id )->user_email );
 	}
 
-	public function test_email_change_succeeds_with_correct_password(): void {
+	/**
+	 * The oracle-closing assertion.
+	 *
+	 * REST no longer accepts a password as proof of intent, so even the CORRECT
+	 * password does not let the change through. This is what removes the
+	 * unthrottled guessing channel: wp_check_password() is never reached from a
+	 * REST request, for any credential class, so there is no yes/no signal to
+	 * mine. Proof of intent must come from an interactive session.
+	 */
+	public function test_correct_password_over_rest_is_ignored_and_does_not_commit(): void {
 		$res = $this->change_own_email( 'adminpass' );
 
-		$this->assertSame( 200, $res->get_status() );
-		$this->assertSame( 'changed-rest@example.test', get_userdata( $this->admin_id )->user_email );
+		$this->assertSame( 403, $res->get_status() );
+		$this->assertSame( 'ca_reauth_required', $res->get_data()['code'] );
+		$this->assertSame(
+			'admin-rest@example.test',
+			get_userdata( $this->admin_id )->user_email,
+			'a correct password sent over REST must not commit the change'
+		);
 	}
 
-	public function test_open_window_lets_a_subsequent_request_through_without_password(): void {
-		// Confirm once...
-		$this->change_own_email( 'adminpass' );
-		// ...then a second gated change within the window needs no password.
-		$req = new WP_REST_Request( 'POST', '/wp/v2/users/me' );
-		$req->set_param( 'email', 'second-change@example.test' );
+	/**
+	 * A wrong and a right password must be indistinguishable from outside —
+	 * same status, same code, same effect. That equivalence IS the fix.
+	 */
+	public function test_right_and_wrong_passwords_are_indistinguishable_over_rest(): void {
+		$wrong = $this->change_own_email( 'not-the-password' );
+		$right = $this->change_own_email( 'adminpass' );
+
+		$this->assertSame( $wrong->get_status(), $right->get_status() );
+		$this->assertSame( $wrong->get_data()['code'], $right->get_data()['code'] );
+		$this->assertSame( 'admin-rest@example.test', get_userdata( $this->admin_id )->user_email );
+	}
+
+	/** The REST refusal should tell an integrator where intent can be proven. */
+	public function test_rest_refusal_points_at_wp_admin(): void {
+		$res = $this->change_own_email( null );
+
+		$this->assertStringContainsString( 'wp-admin', $res->get_data()['message'] );
+		$this->assertArrayNotHasKey(
+			'actions',
+			$res->get_data()['data'],
+			'the refusal must not echo which fields were detected as consequential'
+		);
+	}
+
+	/**
+	 * Core's REST dispatcher matches routes case-insensitively
+	 * (WP_REST_Server::dispatch, '@^' . $route . '$@i'), so a case-varied path
+	 * dispatches normally and must not slip past the gate.
+	 */
+	public function case_varied_routes(): array {
+		return array(
+			'collection segment' => array( '/wp/v2/Users/me' ),
+			// The 'me' segment matters independently: the route regex is
+			// case-insensitive, so `/users/ME` matches and $m[1] is 'ME'. If the
+			// target segment is not lower-cased, `'me' === 'ME'` is false,
+			// (int) 'ME' is 0, $existing stays null, and triggered_actions_rest()
+			// never detects the email change — ungated commit.
+			'me segment'         => array( '/wp/v2/users/ME' ),
+			'both segments'      => array( '/wp/v2/Users/Me' ),
+		);
+	}
+
+	/**
+	 * Core's REST dispatcher matches routes case-insensitively
+	 * (WP_REST_Server::dispatch, '@^' . $route . '$@i'), so a case-varied path
+	 * dispatches normally and must not slip past the gate.
+	 *
+	 * @dataProvider case_varied_routes
+	 * @param string $route Route to attempt the gated change on.
+	 */
+	public function test_case_varied_routes_are_still_gated( string $route ): void {
+		$req = new WP_REST_Request( 'POST', $route );
+		$req->set_param( 'email', 'case-bypass@example.test' );
 		$res = rest_do_request( $req );
 
-		$this->assertSame( 200, $res->get_status() );
-		$this->assertSame( 'second-change@example.test', get_userdata( $this->admin_id )->user_email );
+		$this->assertSame( 403, $res->get_status(), $route . ' must be gated' );
+		$this->assertSame(
+			'admin-rest@example.test',
+			get_userdata( $this->admin_id )->user_email,
+			$route . ' must not commit the change'
+		);
 	}
 }

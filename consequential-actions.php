@@ -56,14 +56,15 @@ const NONCE_FIELD   = 'ca_confirm_nonce';
  * mode, a fresh login), further consequential actions by the same user skip the
  * prompt for this long.
  *
- * NOTE this is NOT a session. It is a single per-user transient flag with a TTL
- * (see confirm_key()) — a deliberately minimal imitation of sudo-mode's short
- * elevation. It is not cookie- or session-bound, so it is shared across all of
- * the user's sessions/devices for the window's duration. A real implementation
- * binds elevation to the session (WP Sudo does); this MVP intentionally does not.
+ * The window is a transient keyed to the **login session** that opened it (see
+ * confirm_key()) — a deliberately minimal imitation of sudo-mode's short
+ * elevation. It was per-user until the session binding landed, which meant one
+ * browser's confirm elevated every concurrent session and every API credential
+ * on the account; that is the failure this MVP argues core should not repeat.
  *
- * Trade-off: a window is friendlier but widens exposure — a session hijacked
- * right after a confirm inherits it. Filter to 0 to always re-challenge.
+ * Residual trade-off: a window is friendlier than re-prompting, but a session
+ * hijacked *within* its own open window still inherits it. That is inherent to
+ * any window and is why the TTL is short; filter to 0 to always re-challenge.
  *
  * @return int Seconds. 0 = always re-challenge.
  */
@@ -271,12 +272,21 @@ function triggered_actions_rest( array $params, bool $is_update, $existing ) : a
  *
  * The point of this MVP is that the gate is on the *action*, not one form. So the
  * same reauth rule that guards the admin user screens also guards writes to
- * /wp/v2/users, whether the request is cookie-authenticated or uses an
- * Application Password. A caller proves intent the same way as on the form: by
- * sending THEIR OWN current password (never the target's) in ca_confirm_password
- * — the one thing a hijacked session or a leaked Application Password cannot do.
- * A recent confirm from either surface opens the shared sudo window, so a
- * confirm in wp-admin also lets a follow-up REST call through for the window.
+ * /wp/v2/users, whatever credential the request arrived on.
+ *
+ * REST does not accept a password as proof of intent, deliberately. It used to:
+ * a caller could send its own current password in ca_confirm_password. That was
+ * an unthrottled password oracle — wp_check_password() fires neither
+ * wp_login_failed nor the authenticate chain, so failed guesses were invisible
+ * to every login throttle and unlogged here, and a bearer credential could mine
+ * it at will. Removing the field removes the yes/no signal outright, for every
+ * credential class, rather than special-casing the one core exposes a getter for.
+ *
+ * So a gated REST action is *gated* but not *satisfiable* from REST: the only
+ * way through is a window opened by confirming in wp-admin, in the same browser
+ * (the window is session-bound — see confirm_key()). Proof of intent belongs to
+ * an interactive session; an API surface should require a fresh interactive
+ * elevation, not carry a password in a request body.
  *
  * @param mixed            $result  Dispatch result; non-null means already handled.
  * @param \WP_REST_Server  $server  REST server (unused).
@@ -290,7 +300,10 @@ function gate_rest( $result, $server, $request ) {
 		return $result;
 	}
 
-	if ( ! preg_match( '#^/wp/v2/users(?:/(me|\d+))?$#', (string) $request->get_route(), $m ) ) {
+	// Case-insensitive to match core's dispatcher, which compares routes with
+	// '@^' . $route . '$@i' (WP_REST_Server::dispatch). A case-sensitive test
+	// here let `POST /wp/v2/Users/me` dispatch normally and skip the gate.
+	if ( ! preg_match( '#^/wp/v2/users(?:/(me|\d+))?$#i', (string) $request->get_route(), $m ) ) {
 		return $result;
 	}
 	// Reads and DELETE pass through (delete-user is not in this MVP catalog).
@@ -298,7 +311,12 @@ function gate_rest( $result, $server, $request ) {
 		return $result;
 	}
 
-	$target_seg = $m[1] ?? '';
+	// Lower-cased because the route match above is case-insensitive, to mirror
+	// core's dispatcher. Without this the 'me' comparison below silently fails
+	// on `/wp/v2/users/ME`: $existing stays null, the email change is never
+	// detected, and the request passes ungated — the same bypass the regex flag
+	// closed, one line further down.
+	$target_seg = strtolower( $m[1] ?? '' );
 	$is_update  = ( '' !== $target_seg ); // POST/PUT to /users/<id|me> = update; POST to /users = create.
 	$existing   = null;
 	if ( $is_update ) {
@@ -311,32 +329,16 @@ function gate_rest( $result, $server, $request ) {
 		return $result;
 	}
 
-	// Inline confirm: the actor's OWN current password, sent with the request.
-	$password = $request->get_param( CONFIRM_FIELD );
-	if ( is_string( $password ) && '' !== $password ) {
-		$actor = wp_get_current_user();
-		if ( wp_check_password( $password, $actor->user_pass, $actor->ID ) ) {
-			mark_confirmed( (int) $actor->ID );
-			return $result;
-		}
-	}
-
-	$labels = array_map(
-		static function ( $id ) {
-			$catalog = actions();
-			return $catalog[ $id ]['label'];
-		},
-		$triggered
-	);
-
+	// No password is accepted here, deliberately — see the docblock. Proof of
+	// intent has to come from an interactive session, so the only way past this
+	// is a window opened by confirming in wp-admin, in this same browser.
+	//
+	// The response carries no detail about *which* fields were consequential:
+	// that was a free equality oracle on other users' stored emails and roles.
 	return new \WP_Error(
 		'ca_reauth_required',
-		sprintf(
-			/* translators: %s: comma-separated list of action labels. */
-			__( 'Reauthentication required before: %s. Resend the request with your current password in the "ca_confirm_password" field, or confirm once in wp-admin to open a short window.', 'consequential-actions' ),
-			implode( ', ', $labels )
-		),
-		array( 'status' => 403, 'actions' => $triggered )
+		__( 'Reauthentication required. Confirm your password in wp-admin to open a short window in this browser, then retry. A password sent in this request is not accepted as proof of intent.', 'consequential-actions' ),
+		array( 'status' => 403 )
 	);
 }
 
@@ -823,25 +825,85 @@ function on_login( $user_login, $user = null ) : void {
 	}
 	if ( get_transient( pending_key( (int) $user->ID ) ) ) {
 		delete_transient( pending_key( (int) $user->ID ) );
-		mark_confirmed( (int) $user->ID );
-		// A forced re-login IS the reauthentication. When the window is disabled
-		// (ca_sudo_window = 0), mark_confirmed() stores nothing, so grant a one-time
-		// pass to authorize the retry — otherwise hardened mode loops the user
-		// straight back out. Only in zero-window mode: when a window IS configured,
-		// mark_confirmed() already covers the retry, and a longer-lived one-shot
-		// would let reauth outlive ca_sudo_window.
-		if ( window_seconds() <= 0 ) {
-			set_transient( reauthed_key( (int) $user->ID ), 1, 15 * MINUTE_IN_SECONDS );
-		}
+
+		// A forced re-login IS the reauthentication, but it cannot be recorded as
+		// a window here: wp_login fires after wp_set_auth_cookie(), which only
+		// calls setcookie() — it never populates $_COOKIE — and the browser was
+		// logged out, so this request carries no login cookie at all. There is
+		// therefore no session token to bind to yet, and mark_confirmed() would
+		// silently store nothing.
+		//
+		// So always grant the one-time pass. confirmed_recently() consumes it on
+		// the next request, which does carry a verified session, and opens the
+		// real session-bound window at that point.
+		//
+		// Note the window is therefore anchored at *consumption*, not at login,
+		// so total elevation after a forced re-login can reach this TTL plus
+		// ca_sudo_window. That is deliberate — the re-login is a genuine fresh
+		// authentication, so earning a full window from the moment it is used
+		// matches what mark_confirmed() did here before the window was bound —
+		// but it is the reason this TTL is kept short rather than open-ended.
+		set_transient( reauthed_key( (int) $user->ID ), 1, 15 * MINUTE_IN_SECONDS );
 	}
 }
 
 /**
+ * Transient key for a recent confirmation, bound to the login session.
+ *
+ * The window used to be keyed on the user ID alone, which meant one browser's
+ * confirmation elevated every concurrent session and every API credential on
+ * that account — the legitimate admin's keystroke opened the door for a cloned
+ * cookie (finding CA-1). Mixing the session token in scopes the window to the
+ * browser that actually answered the challenge.
+ *
+ * A caller with no login cookie — Application Password, JWT, OAuth, WP-CLI —
+ * has no session token, so it gets an empty key: it can neither open a window
+ * nor read one. That is deliberate, and it is why this covers every bearer
+ * credential rather than only the one core exposes a getter for.
+ *
+ * The token is hashed, not stored: this string becomes an option name, and a
+ * session token is a credential.
+ *
  * @param int $user_id
- * @return string Transient key for a user's recent-confirmation flag.
+ * @return string Transient key, or '' when the request has no login session.
  */
 function confirm_key( int $user_id ) : string {
-	return 'ca_confirmed_' . $user_id;
+	$token = verified_session_token( $user_id );
+	if ( '' === $token ) {
+		return '';
+	}
+
+	return 'ca_confirmed_' . $user_id . '_' . substr( hash( 'sha256', $token ), 0, 20 );
+}
+
+/**
+ * The current request's session token, but only if it is genuinely one of this
+ * user's live sessions.
+ *
+ * wp_get_session_token() is NOT a validator. It reads wp_parse_auth_cookie(),
+ * which explodes the cookie on '|', checks that there are four parts, and
+ * returns them — it verifies no HMAC and no expiry. So any caller can make
+ * wp_get_session_token() return a non-empty string just by attaching
+ * `Cookie: wordpress_logged_in_<hash>=a|b|c|d`. Testing it for emptiness is
+ * therefore a check the attacker can simply switch off.
+ *
+ * WP_Session_Tokens::verify() is the real test: it looks the token up in the
+ * user's own session store, so a forged or expired one fails.
+ *
+ * @param int $user_id User whose sessions the token must belong to.
+ * @return string The verified token, or '' if there is no valid login session.
+ */
+function verified_session_token( int $user_id ) : string {
+	if ( $user_id <= 0 ) {
+		return '';
+	}
+
+	$token = wp_get_session_token();
+	if ( '' === $token ) {
+		return '';
+	}
+
+	return \WP_Session_Tokens::get_instance( $user_id )->verify( $token ) ? $token : '';
 }
 
 /**
@@ -867,16 +929,30 @@ function reauthed_key( int $user_id ) : string {
  */
 function confirmed_recently() : bool {
 	$uid = get_current_user_id();
-	// A forced re-login grants a one-time pass, honored even when the window is
-	// disabled — consume it here so it authorizes exactly one retry.
-	if ( get_transient( reauthed_key( $uid ) ) ) {
+
+	// Hardened mode's one-time pass stays keyed per-user: it has to survive the
+	// forced logout that creates it, so there is no session to bind it to at
+	// write time. Only a caller holding a *verified* login session may consume
+	// it — the mode forces a browser re-login, so a bearer credential (or a
+	// forged cookie) racing for the pass must not be able to take it.
+	if ( '' !== verified_session_token( $uid ) && get_transient( reauthed_key( $uid ) ) ) {
 		delete_transient( reauthed_key( $uid ) );
+		// A real session exists now, which it did not at wp_login time, so this
+		// is the first moment the window the re-login earned can be bound.
+		mark_confirmed( $uid );
 		return true;
 	}
+
 	if ( window_seconds() <= 0 ) {
 		return false;
 	}
-	return (bool) get_transient( confirm_key( $uid ) );
+
+	$key = confirm_key( $uid );
+	if ( '' === $key ) {
+		return false; // No login session ⇒ no window can be held.
+	}
+
+	return (bool) get_transient( $key );
 }
 
 /**
@@ -886,8 +962,11 @@ function confirmed_recently() : bool {
  */
 function mark_confirmed( int $user_id ) : void {
 	$window = window_seconds();
-	if ( $window > 0 ) {
-		set_transient( confirm_key( $user_id ), time(), $window );
+	$key    = confirm_key( $user_id );
+
+	// No login session ⇒ nothing to bind the window to, so none is opened.
+	if ( $window > 0 && '' !== $key ) {
+		set_transient( $key, time(), $window );
 	}
 }
 

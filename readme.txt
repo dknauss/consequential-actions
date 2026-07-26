@@ -14,14 +14,13 @@ for the core path in Trac #20140.
 == Description ==
 
 **WARNING -- DO NOT RUN THIS ON A PRODUCTION SITE.** This is a demonstrator, not a
-security product. The confirm field is a deliberately un-throttled password oracle:
-all three gates call `wp_check_password()` directly, which does not fire
-`wp_login_failed` or the `authenticate` chain, so failed guesses are invisible to
-the login throttles that hook those, are not rate-limited here, and are not
-logged. The REST gate
-does not distinguish cookie auth from Application-Password auth, so a leaked
-Application Password can guess the account's main password without limit.
-Installing this plugin *adds* an attack surface that did not exist before.
+security product. The wp-admin confirm field is a deliberately un-throttled
+password oracle: the form and bulk gates call `wp_check_password()` directly,
+which does not fire `wp_login_failed` or the `authenticate` chain, so failed
+guesses are invisible to the login throttles that hook those, are not rate-limited
+here, and are not logged. Reaching it needs a live admin session -- which is this
+MVP's own stated threat. REST no longer accepts a password at all, so that channel
+is closed for every credential class.
 REST user deletion is out of the MVP catalog by design; Application-Password
 issuance is ungated too (the route pattern never matches it). Both are documented.
 Use WordPress Playground or a throwaway site. For a production reauthentication
@@ -57,10 +56,11 @@ reauthentication — a stricter opt-in for stolen-cookie-sensitive sites, not th
 default. (Trac #20140 comment 32 walks back the earlier "just terminate the
 session" idea in favor of the window.)
 
-The same gate covers the REST users routes (/wp/v2/users), for both cookie- and
-Application-Password-authenticated writes, so the block is on the consequential
-*action*, not one screen. A REST caller proves intent by resending with its own
-current password in ca_confirm_password, or by confirming once in wp-admin.
+The same gate covers the REST users routes (/wp/v2/users) whatever credential the
+request arrived on, so the block is on the consequential *action*, not one screen.
+REST cannot be used to prove intent, though: no password is accepted there. A REST
+caller passes only inside a window opened by confirming in wp-admin in that same
+browser, because the window is bound to the login session that opened it.
 
 == What this deliberately does NOT do ==
 
