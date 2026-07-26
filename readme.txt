@@ -100,8 +100,26 @@ than as another standalone product.
 * Automated WordPress integration tests for all three gates, driving the real save
   paths against live WordPress + MySQL, plus GitHub Actions CI (units PHP 7.4-8.3;
   integration PHP 8.2/8.3 against WP 6.4 + latest).
-* Security note: the confirm field remains deliberately un-throttled. See the
-  "DO NOT RUN THIS ON A PRODUCTION SITE" warning above -- this is a demonstrator.
+* Security: the sudo window is now bound to the login session that opened it. It
+  used to be a per-user flag, so one browser's confirmation elevated every
+  concurrent session and every API credential on the account. A caller with no
+  login session -- Application Password, JWT, OAuth, WP-CLI -- can now neither
+  open a window nor inherit one.
+* Security: REST no longer accepts a password as proof of intent. The confirm
+  field was an unthrottled guessing oracle there (wp_check_password() fires
+  neither wp_login_failed nor the authenticate chain, so failures were invisible
+  to every login throttle), and any bearer credential could mine it. A gated REST
+  action is now gated but not satisfiable from REST: the only way through is a
+  window opened by confirming in wp-admin, in the same browser.
+  BREAKING for API automation that changes emails, creates users, or promotes
+  roles -- POST /wp/v2/users is affected for all API callers.
+* Security: fixed a gate bypass. The route test was case-sensitive while core's
+  REST dispatcher matches case-insensitively, so POST /wp/v2/users/ME dispatched
+  normally and committed with no reauth. Both the route pattern and the target
+  segment are now case-insensitive.
+* Security note: the wp-admin confirm field remains deliberately un-throttled.
+  See the "DO NOT RUN THIS ON A PRODUCTION SITE" warning above -- this is a
+  demonstrator.
 
 = 0.2.1 =
 * Registry: each catalog entry now carries the full metadata shape a core Actions
