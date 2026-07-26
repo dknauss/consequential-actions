@@ -3,7 +3,7 @@ Contributors: dknauss
 Tags: security, reauthentication, sudo, two-factor
 Requires at least: 6.4
 Requires PHP: 7.4
-Stable tag: 0.2.1
+Stable tag: 0.3.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -12,6 +12,20 @@ re-confirm their own password before those actions commit. A runnable argument
 for the core path in Trac #20140.
 
 == Description ==
+
+**WARNING -- DO NOT RUN THIS ON A PRODUCTION SITE.** This is a demonstrator, not a
+security product. The confirm field is a deliberately un-throttled password oracle:
+all three gates call `wp_check_password()` directly, which does not fire
+`wp_login_failed` or the `authenticate` chain, so failed guesses are invisible to
+the login throttles that hook those, are not rate-limited here, and are not
+logged. The REST gate
+does not distinguish cookie auth from Application-Password auth, so a leaked
+Application Password can guess the account's main password without limit.
+Installing this plugin *adds* an attack surface that did not exist before.
+REST user deletion is out of the MVP catalog by design; Application-Password
+issuance is ungated too (the route pattern never matches it). Both are documented.
+Use WordPress Playground or a throwaway site. For a production reauthentication
+plugin, see WP Sudo.
 
 WordPress checks your password once, at login. Everything after rides the auth
 cookie. Anyone holding a live session — a walk-up to an unlocked screen, or a
@@ -75,6 +89,19 @@ a named registry plus a thin gate, offered as a wedge for a core primitive rathe
 than as another standalone product.
 
 == Changelog ==
+
+= 0.3.0 =
+* Bulk role promotion is now gated. The Users-list bulk "Change role to
+  Administrator" is intercepted on `load-users.php` before core runs `set_role()`,
+  matching core's own promote detection (`changeit`, or `action`/`action2` =
+  `promote`). Escalation is judged by effective capability, so custom
+  admin-equivalent roles are caught too. Blocked promotes render an inline
+  interstitial that re-POSTs with the actor's password.
+* Automated WordPress integration tests for all three gates, driving the real save
+  paths against live WordPress + MySQL, plus GitHub Actions CI (units PHP 7.4-8.3;
+  integration PHP 8.2/8.3 against WP 6.4 + latest).
+* Security note: the confirm field remains deliberately un-throttled. See the
+  "DO NOT RUN THIS ON A PRODUCTION SITE" warning above -- this is a demonstrator.
 
 = 0.2.1 =
 * Registry: each catalog entry now carries the full metadata shape a core Actions

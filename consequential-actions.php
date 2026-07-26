@@ -3,7 +3,7 @@
  * Plugin Name:       Consequential Actions (Reauth MVP)
  * Plugin URI:        https://github.com/dknauss/consequential-actions
  * Description:       Requires the acting user to re-confirm their current password before account-takeover actions (password/email change, user creation, promotion to administrator) commit. A minimal demonstrator for a possible WordPress core "consequential actions" registry + proof-of-intent primitive. See Trac #20140.
- * Version:           0.2.1
+ * Version:           0.3.0
  * Requires at least: 6.4
  * Requires PHP:      7.4
  * Author:            Dan Knauss
@@ -21,7 +21,11 @@
  * Surfaces: the same gate covers the admin user forms AND cookie- or
  * application-password-authenticated writes to the REST users routes
  * (/wp/v2/users), so the block is on the consequential *action*, not one screen —
- * the "one guard, every surface" point this MVP exists to make. Still out of
+ * the same-guard-across-surfaces point this MVP exists to make. Note the honest
+ * limit: these are three *enumerated* surface hooks, not a data-layer chokepoint.
+ * A real chokepoint gate would sit inside wp_update_user()/set_role() and cover
+ * every caller; enumerating surfaces is whack-a-mole, and issue #3 (bulk promote)
+ * was exactly that mole. That gap is the argument for a core primitive. Out of
  * scope on purpose: WP-CLI / cron policy, request stash-and-replay, 2FA-aware
  * challenges, multisite network sessions. Those are the heavy framework pieces
  * this MVP argues core should NOT standardize in the same release; WP Sudo
@@ -759,7 +763,7 @@ function enqueue_modal( $hook ) : void {
 		'ca-modal',
 		plugins_url( 'assets/modal.js', __FILE__ ),
 		array(),
-		'0.2.1',
+		'0.3.0',
 		true
 	);
 
