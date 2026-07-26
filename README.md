@@ -11,6 +11,32 @@ runnable — not to be yet another standalone reauth plugin.
 > non-interactive surfaces, see [WP Sudo](https://github.com/dknauss/Sudo).
 > This repo exists to show the *shape* of a core primitive at minimum size.
 
+> ## ⚠️ Do not run this on a production site
+>
+> The confirm field is an **un-throttled password oracle**, deliberately. All three
+> gates call `wp_check_password()` directly, which fires neither `wp_login_failed`
+> nor the `authenticate` chain — so failed guesses are invisible to the login
+> throttles that hook those (Limit Login Attempts, Wordfence, WP Fail2Ban), are not
+> rate-limited by this plugin, and are not logged anywhere.
+>
+> The REST gate compounds it: nothing here distinguishes cookie auth from
+> Application-Password auth, so `POST /wp/v2/users/me` carrying
+> `ca_confirm_password` over a **leaked Application Password** is an unlimited,
+> unlogged yes/no oracle on the account's main password.
+>
+> Installing this plugin therefore *adds* a password-guessing surface that did not
+> exist before. Throttling is the framework hardening this wedge defers to WP Sudo
+> ([PR #4](https://github.com/dknauss/consequential-actions/pull/4) implemented a
+> bounded lockout and was closed for scope, not correctness — the branch is
+> preserved).
+>
+> Two further account-takeover routes are ungated: REST user deletion (deliberately
+> out of the MVP catalog) and Application-Password issuance (an oversight found while
+> writing this warning — the route pattern is anchored and never matches it). Both are
+> now in the scope table.
+>
+> Run it in [Playground](#try-it-live-wordpress-playground) or a throwaway site. Nowhere else.
+
 ## Scope and guarantees
 
 This prototype **demonstrates** proof-of-intent on the surfaces below. It is not a
@@ -20,9 +46,11 @@ today:
 
 | Surface | Operation | Gated? | Reauth mode | Tested |
 |---|---|:---:|---|:---:|
-| Profile / edit-user / new-user form | Change own/other password or email, promote a user to an admin-equivalent role, create user | ✅ | Window (default) or hardened force-logout | Unit + live E2E |
-| REST `/wp/v2/users` (cookie & Application Password) | Same account-takeover changes | ✅ | Shared window; actor password in the request only when the window is closed (else `403`) | Unit + live E2E |
-| Users list — **bulk** "Change role → Administrator" | Promote to admin-equivalent | ✅ | Inline interstitial (password re-POST) or hardened force-logout | Unit + live E2E |
+| Profile / edit-user / new-user form | Change own/other password or email, promote a user to an admin-equivalent role, create user | ✅ | Window (default) or hardened force-logout | Unit + integration + manual Playground |
+| REST `/wp/v2/users` (cookie & Application Password) | Same account-takeover changes | ✅ | Shared window; actor password in the request only when the window is closed (else `403`) | Unit + integration + manual Playground |
+| Users list — **bulk** "Change role → Administrator" | Promote to admin-equivalent | ✅ | Inline interstitial (password re-POST) or hardened force-logout | Unit + integration + manual Playground |
+| REST `/wp/v2/users/<id>/application-passwords` | Mint a durable API credential | ❌ *(ungated — the route pattern is anchored and does not match; the credential **survives** the password change this MVP protects)* | — | — |
+| REST `DELETE /wp/v2/users/<id>` | Delete a user | ❌ *(ungated — not in the MVP catalog)* | — | — |
 | Direct `set_role()` / `add_role()` / custom PHP | Promote / role change | ❌ *(out of scope — WP Sudo's domain)* | — | — |
 | WP-CLI, cron | Any change | ❌ *(out of scope by design)* | — | — |
 
@@ -36,15 +64,20 @@ today:
   `set_role()` row above).
 - **REST hardened mode.** The REST gate always uses the password-in-request / `403`
   flow and does not force a logout, even when `CA_TERMINATE_SESSION` is set.
-- **Coverage is unit-level** (action detection). The pure detectors are unit-tested,
-  and all three gates were additionally verified end-to-end by hand on WordPress
-  7.0.2 in Playground: the **form** gate (`gate()`) blocks create-user without the
-  confirm and creates it with; the **REST** gate (`gate_rest()`) returns `403
-  ca_reauth_required` on an email change and succeeds once `ca_confirm_password` is
-  supplied; the **bulk** gate (`gate_bulk_promote()`) blocks a bulk promote (block →
+- **Coverage is unit + WordPress-integration.** The pure detectors have Brain\Monkey
+  unit coverage, and all three gates have *automated* integration tests that drive the
+  **real save paths** against a live WordPress + MySQL (`WP_UnitTestCase`): `FormGateTest`
+  calls real `edit_user()` and asserts `username_exists()` is false when blocked;
+  `RestGateTest` calls real `rest_do_request()` and asserts the email did not commit;
+  `BulkGateTest` covers the bulk-promote interstitial. Both suites run in CI: units
+  across PHP 7.4–8.3, integration on PHP 8.2 and 8.3 against WordPress 6.4 (the
+  plugin's "Requires at least") and latest.
+  All three gates were *additionally* verified by hand in Playground (block →
   interstitial → correct password → promotion; wrong password re-challenges; a
-  non-escalating change and a crafted `action=promote` both behave correctly). There
-  are still no *automated* end-to-end tests of these save paths.
+  non-escalating change and a crafted `action=promote` both behave correctly).
+  What is still missing is **browser-level E2E** (Playwright) covering the modal and
+  the interstitial as a user drives them — rung 3 of
+  [#9](https://github.com/dknauss/consequential-actions/issues/9).
 
 The wedge now gates the action across **three enumerated user-management surfaces**:
 the form, the REST route, and the Users-list bulk action. Arbitrary programmatic
@@ -111,18 +144,24 @@ could not be silently hijacked.
 
 On the surfaces in the [Scope and guarantees](#scope-and-guarantees) table, the gate
 blocks the **account-takeover** class; it does not make a hijacked *admin* omnipotent
-(that admin could still install a plugin — out of scope for this MVP), and it does not
-yet cover bulk role changes ([issue #3](https://github.com/dknauss/consequential-actions/issues/3)).
+(that admin could still install a plugin — out of scope for this MVP). Bulk role
+changes *are* covered ([#3](https://github.com/dknauss/consequential-actions/issues/3),
+landed); arbitrary programmatic `set_role()` is not.
 
-[**Open in Playground**](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/main/demo/blueprint.json) &nbsp;·&nbsp; [Stable fallback (pinned `v0.2.1`)](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/v0.2.1/demo/blueprint-pinned.json)
+[**Open in Playground**](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/main/demo/blueprint.json) &nbsp;·&nbsp; [Older pinned fallback (`v0.2.1`, no bulk gate)](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/v0.2.1/demo/blueprint-pinned.json)
 
 The primary link tracks `main`, and the blueprint it loads installs the plugin
 from `main` too — so the live demo always runs current code (including the REST
-walkthrough) rather than a stale pinned release. The **stable fallback** pins
-every source (plugin, narrator, blueprint) to the immutable `v0.2.1` tag, so it
-keeps working even if `main` is temporarily broken. Both blueprints live in
-[`demo/`](demo/). (Maintainer note: the fallback resolves once the `v0.2.1` tag
-is cut; bump it to the current release tag each release.)
+walkthrough) rather than a stale pinned release. The **fallback** pins every source
+(plugin, narrator, blueprint) to the immutable `v0.2.1` tag, so it keeps working even
+if `main` is temporarily broken. Both blueprints live in [`demo/`](demo/).
+
+⚠️ **The fallback is older than the current code, and older than the version in the
+plugin header.** `v0.2.1` predates the bulk-promote gate, so the fallback demo does
+**not** gate the Users-list bulk role change even though the scope table above says
+that is covered. It is a last-resort fallback, not a "stable" equivalent of the
+primary link — use the primary link unless `main` is broken. (Maintainer note: cut a
+`v0.3.0` tag and repoint this fallback to it; the pin should move every release.)
 
 ## What this deliberately does NOT do
 
@@ -133,11 +172,10 @@ implementation (WP Sudo) takes on.
 
 It **does** now cover the REST users routes (`/wp/v2/users`), for both cookie- and
 Application-Password-authenticated writes, so the gate spans the admin form **and**
-the REST route for these actions — not just one screen. It does not reach every
-path to the same *effect*: the Users-list **bulk** role change is a **planned** gap
-([#3](https://github.com/dknauss/consequential-actions/issues/3)), while arbitrary
-programmatic `set_role()` from custom code is **deliberately out of scope** (WP
-Sudo's domain). See [Scope and guarantees](#scope-and-guarantees). What it also does not add is
+the REST route for these actions — not just one screen. It also covers the Users-list
+**bulk** role change ([#3](https://github.com/dknauss/consequential-actions/issues/3),
+landed). It does not reach every path to the same *effect*: arbitrary programmatic
+`set_role()` from custom code is **deliberately out of scope** (WP Sudo's domain). See [Scope and guarantees](#scope-and-guarantees). What it also does not add is
 per-surface *policy* (allow/block/deny tuning), stash-and-replay, or an
 interactive challenge for non-browser callers — a REST caller proves intent by
 resending with `ca_confirm_password`, or by confirming once in wp-admin to open
@@ -160,13 +198,18 @@ Core hooks, no new machinery:
 
 ## Status & next steps
 
-`v0.2.0` is a demonstrator. Status of the follow-ups:
+`v0.3.0` is a demonstrator. Status of the follow-ups:
 
-- **Tests.** ✅ `triggered_actions()`, its REST twin `triggered_actions_rest()`,
-  the sudo-window helpers, and the `actions()` registry metadata contract have
-  Brain\Monkey unit coverage
-  (`tests/TriggeredActionsTest.php`, `tests/RestTriggeredActionsTest.php`). Run with
-  `composer install && composer test`.
+- **Tests.** ✅ Two suites. **Unit** (Brain\Monkey, no database): `triggered_actions()`,
+  its REST twin `triggered_actions_rest()`, the bulk-promote detectors, the sudo-window
+  helpers, and the `actions()` registry metadata contract — `tests/TriggeredActionsTest.php`,
+  `tests/RestTriggeredActionsTest.php`, `tests/BulkPromoteTest.php`,
+  `tests/RegistryContractTest.php`. **Integration** (`WP_UnitTestCase`, real WordPress +
+  MySQL, driving the actual save paths): `tests/Integration/FormGateTest.php`,
+  `RestGateTest.php`, `BulkGateTest.php`, `SmokeTest.php`. Run units with
+  `composer install && composer test`; both run in CI (units PHP 7.4–8.3;
+  integration PHP 8.2/8.3 against WP 6.4 + latest). Browser-level E2E is still outstanding
+  ([#9](https://github.com/dknauss/consequential-actions/issues/9) rung 3).
 - **REST coverage.** ✅ `rest_pre_dispatch` gates `/wp/v2/users` writes with the same
   rule, so the gate spans the form **and** the REST route — though not yet every path
   to the same effect (see [Scope and guarantees](#scope-and-guarantees)).

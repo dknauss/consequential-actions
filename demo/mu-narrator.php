@@ -81,7 +81,9 @@ add_action(
 				. 'because the same rule runs on the REST route. Add '
 				. '<code>ca_confirm_password: \'password\'</code> to the JSON body and it succeeds: '
 				. 'intent proven with the actor&rsquo;s own password, the same test the dialog applies. '
-				. '(One guard, every surface &mdash; the chokepoint thesis the core spec argues.)</p></div>';
+				. '(The same guard on a second surface. A real core primitive would sit at the '
+				. 'data-layer chokepoint and cover <em>every</em> caller &mdash; this MVP enumerates '
+				. 'three surfaces, which is the argument for putting it in core.)</p></div>';
 		}
 	}
 );
