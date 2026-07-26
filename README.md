@@ -152,20 +152,18 @@ blocks the **account-takeover** class; it does not make a hijacked *admin* omnip
 changes *are* covered ([#3](https://github.com/dknauss/consequential-actions/issues/3),
 landed); arbitrary programmatic `set_role()` is not.
 
-[**Open in Playground**](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/main/demo/blueprint.json) &nbsp;·&nbsp; [Older pinned fallback (`v0.2.1`, no bulk gate)](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/v0.2.1/demo/blueprint-pinned.json)
+[**Open in Playground**](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/main/demo/blueprint.json) &nbsp;·&nbsp; [Stable fallback (pinned `v0.3.0`)](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/dknauss/consequential-actions/v0.3.0/demo/blueprint-pinned.json)
 
 The primary link tracks `main`, and the blueprint it loads installs the plugin
 from `main` too — so the live demo always runs current code (including the REST
 walkthrough) rather than a stale pinned release. The **fallback** pins every source
-(plugin, narrator, blueprint) to the immutable `v0.2.1` tag, so it keeps working even
+(plugin, narrator, blueprint) to the immutable `v0.3.0` tag, so it keeps working even
 if `main` is temporarily broken. Both blueprints live in [`demo/`](demo/).
 
-⚠️ **The fallback is older than the current code, and older than the version in the
-plugin header.** `v0.2.1` predates the bulk-promote gate, so the fallback demo does
-**not** gate the Users-list bulk role change even though the scope table above says
-that is covered. It is a last-resort fallback, not a "stable" equivalent of the
-primary link — use the primary link unless `main` is broken. (Maintainer note: cut a
-`v0.3.0` tag and repoint this fallback to it; the pin should move every release.)
+(Maintainer note: the pin must move every release. CI enforces that
+`demo/blueprint-pinned.json` references the same version as the plugin header,
+so a bump without a repoint fails the build — that mismatch previously shipped
+a "stable" demo with neither the bulk gate nor the session-bound window.)
 
 ## What this deliberately does NOT do
 
