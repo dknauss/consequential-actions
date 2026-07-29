@@ -16,10 +16,12 @@ proof of intent before they commit.* Built to make the argument in
 [Core Trac #20140](https://core.trac.wordpress.org/ticket/20140) concrete and
 runnable — not to be yet another standalone reauth plugin.
 
-> **This is a wedge, not a product.** For a maintained, production reauthentication
-> plugin that gates actions across admin/AJAX/REST and applies policy to
-> non-interactive surfaces, see [WP Sudo](https://github.com/dknauss/Sudo).
-> This repo exists to show the *shape* of a core primitive at minimum size.
+> **This was a wedge, not a product.** Its companion project,
+> [WP Sudo](https://github.com/dknauss/Sudo), attempted broader enforcement and
+> has also concluded. The [final finding](https://github.com/dknauss/Sudo/blob/main/docs/finding.md)
+> explains why enumerating request surfaces could not sustain that security
+> claim and what a Core-owned consequential-action primitive would need instead.
+> Both repositories remain public as evidence, not maintained security controls.
 
 > ## ⚠️ Do not run this on a production site
 >
