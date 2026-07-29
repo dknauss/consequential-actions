@@ -1,3 +1,13 @@
+> [!CAUTION]
+> **Historical demonstrator — do not install.** This repository is archived and
+> read-only. It was a wedge demonstrator for a possible WordPress core primitive
+> (Trac #20140), not a maintained plugin. Its companion project, WP Sudo,
+> concluded as a research prototype after an adversarial audit found seven
+> high-severity bypasses of its own central claim. See
+> [dknauss/Sudo/blob/main/docs/finding.md](https://github.com/dknauss/Sudo/blob/main/docs/finding.md)
+> for the finding and the resulting core proposal. All code, tags, and history
+> here are preserved as historical record.
+
 # Consequential Actions (Reauth MVP)
 
 A minimal, five-minute-readable demonstrator for a possible WordPress **core**
