@@ -3,7 +3,10 @@
 > read-only. It was a wedge demonstrator for a possible WordPress core primitive
 > (Trac #20140), not a maintained plugin. Its companion project, WP Sudo,
 > concluded as a research prototype after an adversarial audit found seven
-> high-severity bypasses of its own central claim. See
+> high-severity bypasses of its own central claim. Start with
+> [dknauss/Sudo/blob/main/docs/sudo-architecture-history.md](https://github.com/dknauss/Sudo/blob/main/docs/sudo-architecture-history.md)
+> — a short, plain-language walk through every approach tried, including this
+> one — or go straight to
 > [dknauss/Sudo/blob/main/docs/finding.md](https://github.com/dknauss/Sudo/blob/main/docs/finding.md)
 > for the finding and the resulting core proposal. All code, tags, and history
 > here are preserved as historical record.
